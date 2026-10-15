@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.2.0';
+  var VERSION = 'cro-ui 0.2.1';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -163,7 +163,16 @@
   };
 
   /* ---------- shell ---------- */
-  var page = (function () { var el = document.querySelector('[data-cro-page]'); return el ? el.getAttribute('data-cro-page') : 'dashboard'; })();
+  // Page: from the form name in the URL (CRO_Send.form -> send), else the marker. TotalAgility renders HTML
+  // controls as srcdoc iframes, so the marker is looked for in the iframe markup too.
+  var page = (function () {
+    var m = /\/([^\/]+)\.form$/i.exec(location.pathname);
+    if (m) for (var k in PAGES) if (PAGES[k].toLowerCase() === m[1].toLowerCase()) return k;
+    var el = document.querySelector('[data-cro-page]'); if (el) return el.getAttribute('data-cro-page');
+    var fr = document.querySelectorAll('iframe[srcdoc]');
+    for (var i = 0; i < fr.length; i++) { var x = /data-cro-page=["']?([a-z]+)/i.exec(fr[i].getAttribute('srcdoc') || ''); if (x) return x[1]; }
+    return 'dashboard';
+  })();
   var root;
   var shell = function () {
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
