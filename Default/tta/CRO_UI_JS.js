@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.3.2';
+  var VERSION = 'cro-ui 0.4.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -715,6 +715,98 @@
     load().catch(fail);
   };
 
+  /* ---------- users (admins) ---------- */
+  var USTATUS = { pending: ['Not in Circularo', '#98A2B3'], invited: ['Invited', '#7A5AF8'], active: ['Active', '#12B76A'], suspended: ['Suspended', '#F79009'],
+    deleted: ['Deleted', '#667085'], error: ['Error', '#F04438'], newly_created: ['Invited', '#7A5AF8'] };
+  var upill = function (st) { var s = USTATUS[st] || [st || '–', '#667085']; return '<span class="cro-pill" style="background:' + s[1] + '1F;color:' + s[1] + '">' + esc(s[0]) + '</span>'; };
+  var ROLE_LABEL = { sign: 'Signer', user: 'User', prepare: 'Preparer', read: 'Read only', admin: 'Admin' };
+  var renderUsers = function () {
+    main().innerHTML = '<div class="cro-skel">Loading…</div>';
+    var tta = [];
+    var ttaP = sdk('ResourceService', 'GetResources', { resourceFilter: { ResourceType: 0, SearchText: '' }, resourceIconSettings: null })
+      .then(function (l) { tta = (l || []).filter(function (r) { return r.EmailAddress; }).map(function (r) { return { id: r.Identity.Id, name: r.Identity.Name, email: String(r.EmailAddress).toLowerCase() }; }); })
+      .catch(function () { tta = []; });
+    var load = function () {
+      return Promise.all([cro('users_overview', {}), ttaP]).then(function (r) {
+        var d = r[0], recs = set0(d.records), cx = d.circularo || [], org = d.org || {}, G = org.groups || {};
+        var roleOf = function (groups) { for (var k in G) if ((groups || []).indexOf(G[k]) >= 0 && k !== 'user') return k; return (groups || []).indexOf(G.user) >= 0 ? 'user' : ''; };
+        var ttaBy = function (id, email) { return tta.filter(function (t) { return (id && t.id === id) || (!id && email && t.email === email.toLowerCase()); })[0]; };
+        var used = {};
+        var rows = recs.map(function (u) {
+          var c = cx.filter(function (x) { return (u.circularo_username && x.name === u.circularo_username) || x.mail.toLowerCase() === u.email.toLowerCase(); })[0];
+          if (c) used[c.name] = 1;
+          return { rec: u, cx: c };
+        });
+        cx.forEach(function (c) { if (!used[c.name]) rows.push({ rec: null, cx: c }); });
+        main().innerHTML =
+          '<div class="cro-h1"><h1>Users</h1><div class="ctl"><button class="cro-btn2" id="croReload">Refresh</button></div></div>' +
+          '<p class="cro-lead">TotalAgility manages the Circularo accounts of internal signers. External signers need no account.</p>' +
+          '<div class="cro-card"><h2>People <small>' + rows.length + '</small></h2>' +
+          '<table class="cro-table cro-list"><tr><th>Person</th><th>TotalAgility user</th><th>Circularo account</th><th>Role</th><th>Status</th><th></th></tr>' +
+          rows.map(function (x, i) {
+            var u = x.rec, c = x.cx, t = u ? ttaBy(u.tta_resource_id, u.tta_resource_id ? '' : u.email) : ttaBy('', c.mail);
+            var st = u ? u.status : (c.status === 'newly_created' ? 'invited' : c.status);
+            var role = u ? u.circularo_role : roleOf(c.groups);
+            var acts = '';
+            if (!u) acts = '<button class="cro-btn2 cro-sm" data-manage="' + i + '">Manage in CRO</button>';
+            else if (!c && (u.status === 'pending' || u.status === 'error')) acts = '<button class="cro-btn cro-sm" data-invite="' + i + '">Invite to Circularo</button>';
+            if (u && c && st === 'active') acts += ' <button class="cro-btn2 cro-sm cro-danger" data-st="' + i + '" data-to="suspended">Suspend</button>';
+            if (u && c && st === 'suspended') acts += ' <button class="cro-btn2 cro-sm" data-st="' + i + '" data-to="active">Reactivate</button>';
+            return '<tr><td><b>' + esc(u ? u.full_name : c.fullname) + '</b><div class="cro-sub">' + esc(u ? u.email : c.mail) + '</div></td>' +
+              '<td>' + (t ? esc(t.name) : '<span class="cro-sub">–</span>') + '</td>' +
+              '<td>' + (c ? '<span class="cro-mono" style="font-size:12px">' + esc(c.name) + '</span>' : '<span class="cro-sub">none</span>') + (u ? '' : '<div class="cro-sub">not managed by CRO</div>') + '</td>' +
+              '<td>' + esc(ROLE_LABEL[role] || role || '–') + '</td>' +
+              '<td>' + upill(st) + (u && u.last_error ? '<div class="cro-sub cro-badc" title="' + esc(u.last_error) + '">' + esc(u.last_error.slice(0, 60)) + '</div>' : '') + '</td>' +
+              '<td style="text-align:right;white-space:nowrap">' + acts + '</td></tr>';
+          }).join('') + '</table></div>' +
+          '<div class="cro-card" style="margin-top:16px"><h2>Add a person</h2><div class="cro-grid cro-g3">' +
+            '<div class="cro-f"><label>TotalAgility user</label><select class="cro-in" id="croTta"><option value="">– choose, or type below –</option>' +
+              tta.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).map(function (t) { return '<option value="' + esc(t.id) + '">' + esc(t.name + ' · ' + t.email) + '</option>'; }).join('') + '</select></div>' +
+            '<div class="cro-f"><label>Full name</label><input class="cro-in" id="croUName"></div>' +
+            '<div class="cro-f"><label>Email</label><input class="cro-in" id="croUMail"></div>' +
+            '<div class="cro-f"><label>Circularo role</label><select class="cro-in" id="croURole">' + (d.roles || ['sign']).map(function (k) { return '<option value="' + k + '">' + esc(ROLE_LABEL[k] || k) + '</option>'; }).join('') + '</select></div>' +
+          '</div><div class="cro-note">Invite creates the Circularo account and Circularo emails the person to set a password. If an account with this email already exists it is linked instead. "Record only" keeps the person in CRO without touching Circularo.</div>' +
+          '<div class="cro-actions"><button class="cro-btn2" data-save="record">Record only</button><button class="cro-btn" data-save="invite">Save and invite</button></div></div>' +
+          (org.organization ? '<div class="cro-foot" style="text-align:left;padding:12px 0">Circularo organization <span class="cro-mono">' + esc(org.organization) + '</span></div>' : '');
+        document.getElementById('croReload').onclick = function () { main().innerHTML = '<div class="cro-skel">Loading…</div>'; load().catch(fail); };
+        var sel = document.getElementById('croTta');
+        sel.onchange = function () { var t = tta.filter(function (x) { return x.id === sel.value; })[0]; if (t) { document.getElementById('croUName').value = t.name; document.getElementById('croUMail').value = t.email; } };
+        var busy = function (b, p) { b.disabled = true; return p.then(function (res) { return load().then(function () { return res; }); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); };
+        main().querySelectorAll('[data-save]').forEach(function (b) {
+          b.onclick = function () {
+            var email = document.getElementById('croUMail').value.trim().toLowerCase(), name = document.getElementById('croUName').value.trim();
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('Enter a valid email address.', true);
+            var t = tta.filter(function (x) { return x.id === sel.value; })[0] || tta.filter(function (x) { return x.email === email; })[0];
+            busy(b, cro('user_save', { email: email, fullName: name || email, role: document.getElementById('croURole').value, ttaResourceId: t ? t.id : '', action: b.getAttribute('data-save') }))
+              .then(function (res) { if (res) toast(res.linked ? 'Linked to the existing Circularo account.' : res.invited ? 'Invitation sent by Circularo.' : 'Saved.'); });
+          };
+        });
+        main().querySelectorAll('[data-manage]').forEach(function (b) {
+          b.onclick = function () {
+            var c = rows[+b.getAttribute('data-manage')].cx, t = ttaBy('', c.mail);
+            busy(b, cro('user_save', { email: c.mail, fullName: c.fullname, role: roleOf(c.groups) || 'sign', ttaResourceId: t ? t.id : '', action: 'link' }))
+              .then(function (res) { if (res) toast('Now managed by CRO.'); });
+          };
+        });
+        main().querySelectorAll('[data-invite]').forEach(function (b) {
+          b.onclick = function () {
+            var u = rows[+b.getAttribute('data-invite')].rec;
+            busy(b, cro('user_save', { email: u.email, fullName: u.full_name, role: u.circularo_role, ttaResourceId: u.tta_resource_id || '', action: 'invite' }))
+              .then(function (res) { if (res) toast(res.linked ? 'Linked to the existing Circularo account.' : 'Invitation sent by Circularo.'); });
+          };
+        });
+        main().querySelectorAll('[data-st]').forEach(function (b) {
+          b.onclick = function () {
+            var u = rows[+b.getAttribute('data-st')].rec, to = b.getAttribute('data-to');
+            if (to === 'suspended' && b.getAttribute('data-sure') !== '1') { b.setAttribute('data-sure', '1'); b.textContent = 'Click again to suspend'; return; }
+            busy(b, cro('user_status', { userId: u.user_id, status: to })).then(function (res) { if (res) toast(to === 'active' ? 'Reactivated.' : 'Suspended in Circularo.'); });
+          };
+        });
+      });
+    };
+    load().catch(function (e) { fail(/administrator/i.test(e.message) ? 'Only CRO administrators can manage users.' : e); });
+  };
+
   /* ---------- pages still to come ---------- */
   var renderSoon = function (title) {
     main().innerHTML = '<div class="cro-h1"><h1>' + esc(title) + '</h1></div><div class="cro-card cro-empty">This page is being built. Use the Dashboard for now.</div>';
@@ -729,6 +821,6 @@
     send: renderSend,
     requests: renderRequests,
     request: renderRequest,
-    users: function () { renderSoon('Users'); }
+    users: renderUsers
   }[page] || renderDashboard)();
 })();
