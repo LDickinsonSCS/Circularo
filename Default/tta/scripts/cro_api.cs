@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.3.1";
+        private const string VERSION = "cro-api 0.4.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -650,6 +650,77 @@ namespace Cro
             }
         }
 
+        // ---- outputs: signed PDF, audit trail, Certificate of Fulfillment -> SQL ----
+        private static string Sha256Hex(byte[] b)
+        {
+            using (var h = System.Security.Cryptography.SHA256.Create())
+            {
+                var x = h.ComputeHash(b); var sb = new StringBuilder();
+                foreach (var c in x) sb.Append(c.ToString("x2"));
+                return sb.ToString();
+            }
+        }
+        private static bool IsPdf(byte[] b) { return b != null && b.Length > 4 && b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46; }
+        private static bool HasSignature(byte[] b)
+        {
+            string t = Encoding.ASCII.GetString(b);
+            return t.Contains("/ByteRange") && (t.Contains("/Type /Sig") || t.Contains("/Type/Sig") || t.Contains("/SubFilter"));
+        }
+        private static string SafeName(string s)
+        {
+            var sb = new StringBuilder();
+            foreach (char c in s) sb.Append("/?<>\\:*|\"".IndexOf(c) >= 0 || c < 32 ? '_' : c);
+            string r = sb.ToString().Trim(); return r.Length > 150 ? r.Substring(0, 150) : r;
+        }
+        private static string FetchOutputs(object cfg, string conn, string key, long requestId, ref string dbg)
+        {
+            var req = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId));
+            if (req == null) throw new Exception("Request not found.");
+            if (JS(req, "state") != "completed") throw new Exception("Request is " + JS(req, "state") + "; outputs are fetched only when completed.");
+            string docId = JS(req, "circularo_document_id");
+            string hash = JS(req, "signed_file_hash");
+            if (hash == "" || hash == JS(req, "original_file_hash"))
+            {
+                // re-read: signing creates a new hash
+                var dj = Cx(cfg, key, "GET", "/documents/" + Uri.EscapeDataString(docId), null, ref dbg);
+                var rl = JL(dj, "results");
+                var doc = rl != null && rl.Count > 0 ? rl[0] : dj;
+                hash = JS(JO(JO(doc, "values"), "pdfFile"), "content"); if (hash == "") hash = JS(JO(doc, "pdfFile"), "content");
+            }
+            if (hash == "") throw new Exception("No signed file hash.");
+            string apiBase = JS(JO(cfg, "circularo"), "apiBase").TrimEnd('/');
+            string tk = "token=" + Uri.EscapeDataString(key);
+            string title = SafeName(JS(req, "title"));
+            var items = new[] {
+                new[] { "signed", apiBase + "/files/loadFile/hash/" + Uri.EscapeDataString(hash) + "?" + tk, title + ".pdf", hash },
+                new[] { "audit", apiBase + "/documents/" + Uri.EscapeDataString(docId) + "/audit?" + tk, title + " (audit trail).pdf", "" },
+                new[] { "certificate", apiBase + "/documents/" + Uri.EscapeDataString(docId) + "/audit?cof=true&" + tk, title + " (certificate of fulfillment).pdf", "" } };
+            var list = new List<object>();
+            foreach (var it in items)
+            {
+                var r = HttpBytes("GET", it[1], null, null, 180);
+                var bytes = (byte[])r[1];
+                var e = new Dictionary<string, object>(); e["kind"] = it[0];
+                if ((int)r[0] != 200 || !IsPdf(bytes))
+                {
+                    string t = Encoding.UTF8.GetString(bytes, 0, Math.Min(bytes.Length, 300)).Replace(key, "***");
+                    e["error"] = "HTTP " + r[0] + (IsPdf(bytes) ? "" : " (not a PDF): " + t);
+                    list.Add(e); continue;
+                }
+                string sha = Sha256Hex(bytes);
+                bool sig = HasSignature(bytes);
+                DbQuery(conn, "cro_api.output_save", "@RequestId", requestId, "@Kind", it[0], "@FileName", it[2], "@ContentType", "application/pdf",
+                        "@Content", bytes, "@Sha256", sha, "@SourceHash", Nz(it[3]), "@HasSignature", sig);
+                e["size"] = (double)bytes.Length; e["sha256"] = sha; e["hasSignature"] = sig; e["fileName"] = it[2];
+                list.Add(e);
+            }
+            bool allOk = true;
+            foreach (var o in list) if (JS(o, "error") != "") allOk = false;
+            if (allOk) DbQuery(conn, "cro_api.request_outputs_done", "@RequestId", requestId, "@Detail", "signed, audit, certificate");
+            var res = new Dictionary<string, object>(); res["requestId"] = (double)requestId; res["documentId"] = docId; res["signedHash"] = hash; res["outputs"] = list; res["complete"] = allOk;
+            return JSer(res);
+        }
+
         // ---- read Circularo status and store it ----
         private static string RefreshRequest(object cfg, string conn, string key, long requestId, string source, ref string dbg)
         {
@@ -872,6 +943,51 @@ namespace Cro
                     {
                         long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
                         result = RefreshRequest(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), rid, "poll", ref dbg);
+                        break;
+                    }
+                    case "request_outputs":
+                    {
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        var rq = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
+                        if (rq == null) throw new Exception("Request not found.");
+                        if (!string.Equals(JS(rq, "created_by_resource_id"), who[0], StringComparison.OrdinalIgnoreCase) && !IsAdmin(cfg, who[0]))
+                            throw new Exception("Only the person who created the request can do this.");
+                        result = FetchOutputs(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), rid, ref dbg);
+                        break;
+                    }
+                    case "output_list":
+                    {
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        result = DbQuery(conn, "cro_api.output_list", "@RequestId", rid);
+                        break;
+                    }
+                    case "output_get":
+                    {
+                        // ARGS: { requestId, kind } -> { fileName, contentType, sha256, b64 }
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        var rq = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
+                        if (rq == null) throw new Exception("Request not found.");
+                        if (!string.Equals(JS(rq, "created_by_resource_id"), who[0], StringComparison.OrdinalIgnoreCase) && !IsAdmin(cfg, who[0]))
+                            throw new Exception("Only the person who created the request can do this.");
+                        var t = DbClient(); var c = Activator.CreateInstance(t, conn);
+                        try
+                        {
+                            Call(c, "Open");
+                            var cmd = Call(c, "CreateCommand");
+                            var ct = Prop(cmd, "CommandType"); ct.SetValue(cmd, Enum.Parse(ct.PropertyType, "StoredProcedure"), null);
+                            Prop(cmd, "CommandText").SetValue(cmd, "cro_api.output_get", null);
+                            var ps = Prop(cmd, "Parameters").GetValue(cmd, null);
+                            Call(ps, "AddWithValue", "@RequestId", rid); Call(ps, "AddWithValue", "@Kind", Arg(a, "kind", 20)); Call(ps, "AddWithValue", "@Actor", who[1] + " (" + who[0] + ")");
+                            var r = Call(cmd, "ExecuteReader");
+                            if (!(bool)Call(r, "Read")) throw new Exception("No " + Arg(a, "kind", 20) + " file for this request.");
+                            var o = new Dictionary<string, object>();
+                            o["fileName"] = Call(r, "GetValue", 0); o["contentType"] = Call(r, "GetValue", 1); o["size"] = Convert.ToDouble(Call(r, "GetValue", 2));
+                            o["sha256"] = Call(r, "GetValue", 3); o["b64"] = Convert.ToBase64String((byte[])Call(r, "GetValue", 4));
+                            Call(r, "Close");
+                            result = JSer(o);
+                        }
+                        catch (TargetInvocationException e) { throw new Exception(Inner(e)); }
+                        finally { try { ((IDisposable)c).Dispose(); } catch (Exception) { } }
                         break;
                     }
                     case "user_list":

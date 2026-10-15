@@ -293,7 +293,9 @@ BEGIN
 
     IF @RecipientsJson IS NOT NULL AND ISJSON(@RecipientsJson) = 1
         UPDATE r SET r.status = j.status,
-                     r.acted_utc = CASE WHEN j.status IN ('signed','rejected','delegated') AND r.acted_utc IS NULL THEN SYSUTCDATETIME() ELSE r.acted_utc END
+                     r.acted_utc = CASE WHEN j.status IN ('pending','waiting') THEN NULL
+                                        WHEN j.status IN ('signed','rejected','delegated') AND r.acted_utc IS NULL THEN SYSUTCDATETIME()
+                                        ELSE r.acted_utc END
         FROM cro.recipient r
         JOIN OPENJSON(@RecipientsJson) WITH (recipient_id BIGINT '$.recipientId', status VARCHAR(12) '$.status') j
           ON j.recipient_id = r.recipient_id

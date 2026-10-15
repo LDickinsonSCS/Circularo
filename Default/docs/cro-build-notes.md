@@ -75,7 +75,8 @@ Started: 2026-10-15.
 | 002_service_login.sql | Login/user for `scs-admin` → `cro_app` (tries domain then machine name; `@override` if needed) | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 002_service_login.sql` | run 2026-10-15 (Leigh) |
 | 003_core_tables.sql | `circularo_user`, `signing_request` (incl. placement/adhoc options), `recipient` (incl. internal mode, share_to, oauth), `webhook_event`, append-only `audit_log` |
 | 003a_option_columns.sql | Adds placement/adhoc_option/placement_used, share_to/internal_mode, oauth protection to tables made by the first 003 | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003a_option_columns.sql` | run 2026-10-15 (Leigh) |
-| 004_procedures.sql | 16 `cro_api` procedures (health, audit, request create/get/list/set_document/set_shares/set_state/outputs_done/due_check, webhook receive/next/done, user list/upsert/set_circularo); raises compat level to 130 if needed. Parsed clean with sqlfluff (tsql). | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 004_procedures.sql` | run 2026-10-15 (Leigh) |
+| 004_procedures.sql | 16 `cro_api` procedures (health, audit, request create/get/list/set_document/set_shares/set_state/outputs_done/due_check, webhook receive/next/done, user list/upsert/set_circularo); raises compat level to 130 if needed. Parsed clean with sqlfluff (tsql). | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 004_procedures.sql` | run 2026-10-15 (Leigh); **re-run needed** for the acted_utc fix |
+| 006_outputs.sql | `cro.output_file` (signed / audit / certificate PDFs, sha256, has_signature) + `output_save/list/get` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 006_outputs.sql` | written, not yet run |
 | 005_secrets.sql | `cro.secret` (DPAPI ciphertext, fingerprint) + `secret_set/get/status` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 005_secrets.sql` | written, not yet run | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | run 2026-10-15 (Leigh) |
 
 ## Live TTA items (category Circularo)
@@ -83,13 +84,13 @@ Started: 2026-10-15.
 |---|---|---|---|---|
 | `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | config v2 (adds `admins`) | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `605e18026849248f0e0eec8f26679c5d99190be650cc8f1de2574cd64c413452` |
 | `CRO_API_KEY` (secure server variable) | `CRO_API_KEY` | – | entry point only: Leigh enters a key, `key_migrate` encrypts it into `cro.secret`, then the variable is blanked | – |
-| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 7 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.3.1) | `d624ffb3872d5ea0520f05e2671e490f1288eb1d9329c92c9e9df8c2ea3ee08a` |
+| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 8 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.4.0) | `1783b0b57da92f8edae86a70353ded9b3dc45c6a315f2e49f82876377040fc40` |
 
-`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
+`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, request_outputs, output_list, output_get, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
 
 ## Decisions & gotchas log
 - 2026-10-15: **Circularo resolves an email that belongs to an internal user to that user** (ldickinson@… → `ldickinson@sudocodesolutions.com.1`, type internal), even when shared as external with OTP. Status must be matched by **shareId** (present in `workflow.waitingFor[]`), never by username – fixed in cro-api 0.3.1 after the first refresh wrongly showed "signed".
-- 2026-10-15: To fix in next SQL update: `request_set_state` should clear `recipient.acted_utc` when a status goes back to waiting/pending (request 1 recipient carries a stale acted_utc from the bug above).
+- 2026-10-15: `request_set_state` now clears `recipient.acted_utc` when a status goes back to waiting/pending (fix in 004; re-run 004).
 - 2026-10-15: `POST /documents` returned the id under `id`; folder path `TTA/CRO` auto-created. `signatureAnchors` sent as a JSON string multipart field works. Date annotations are off by default (`defaults.annotations` absent) until the annotation field format is verified.
 - 2026-10-15: **Key handling decided (Leigh): DPAPI.** The Circularo key is encrypted on the TTA server with DPAPI LocalMachine scope + CRO entropy and stored in `cro.secret`; `CRO_API_KEY` is only the entry point and is blanked after `key_migrate`. Machine scope because sync jobs (web app pool) and async jobs (Core Worker) may run as different identities. Rotation: enter new key in CRO_API_KEY → run key_migrate (admin) → check fingerprint → blank the variable.
 - 2026-10-15: 004 first run failed – tables came from the first 003 (no option columns) and 003 never alters existing tables. Fixed with 003a. Rule: any later column change gets its own lettered script.
@@ -111,6 +112,7 @@ Started: 2026-10-15.
 - GitHub repo moved to `LDickinsonSCS/Circularo` (capital C); remote updated.
 
 ## Verified
+- 2026-10-15 21:22: Leigh signed both test requests. `request_refresh` → both **completed**, recipients signed. Direct check of outputs (browser session): signed PDF 72 KB / 82 KB with 1 `/Sig` + `/ByteRange`; audit trail ~351 KB and Certificate of Fulfillment (`/audit?cof=true`) ~384 KB, both sealed PDFs. Signed hash differs from the original (re-read before download).
 - 2026-10-15 21:14: **First end-to-end send.** Request 1 = sample 01 NDA, anchors, external recipient ldickinson@sudocodesolutions.com (email OTP). Upload → anchor `SIG_RECIPIENT` matched on page 2 → field at x 0.47532, y 0.23599, 0.22×0.045 (as predicted by the sample preview) → document `b6042b53-9a42-402f-856d-5830cef2f065` in folder TTA/CRO → share `hfSOQKEB_eIBv4Mnx0Ac`. Refresh: inprogress, waiting.
 - 2026-10-15 21:20: **Ad hoc send.** Request 2 = sample 06 memo, placement adhoc/default_position → 1 field on last page → document `15126ba2-62a2-4678-bc1b-c95df0928235`, share `mvSQQKEB_eIBv4MnQECE`.
 - 2026-10-15 21:07: `health` → DB Circularo, login SCSDEMO\scs-admin, SQL Server 2022 Express (16.0.1000.6), compat 160, 6 cro tables, 19 cro_api procs.
