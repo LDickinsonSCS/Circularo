@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.4.0';
+  var VERSION = 'cro-ui 0.4.1';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -109,7 +109,7 @@
     '.cro-grid{display:grid;gap:16px}',
     '.cro-g3{grid-template-columns:repeat(3,1fr)}.cro-g5{grid-template-columns:repeat(5,1fr)}.cro-g21{grid-template-columns:2fr 1fr}.cro-g12{grid-template-columns:1fr 2fr}.cro-g11{grid-template-columns:1fr 1fr}',
     '@media(max-width:900px){.cro-g3,.cro-g5,.cro-g21,.cro-g12,.cro-g11{grid-template-columns:1fr}.cro-nav{display:none}}',
-    '.cro-card{background:var(--cro-card);border:1px solid var(--cro-line);border-radius:12px;padding:20px}',
+    '.cro-card{background:var(--cro-card);border:1px solid var(--cro-line);border-radius:12px;padding:20px;overflow-x:auto}',
     '.cro-card h2{font-size:15px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center}',
     '.cro-card h2 small{font-weight:400;color:var(--cro-mute);font-size:12px}',
     '.cro-tile{display:flex;gap:16px;align-items:center;text-decoration:none;color:inherit;transition:transform .12s,box-shadow .12s}',
