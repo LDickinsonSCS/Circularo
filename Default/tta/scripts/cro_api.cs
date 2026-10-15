@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.8.1";
+        private const string VERSION = "cro-api 0.9.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -933,6 +933,44 @@ namespace Cro
             return JSer(info);
         }
 
+        // ---- Circularo users ----
+        private static object CxOrg(object cfg, string key, ref string dbg)
+        {
+            // organization id and role group ids, from the API key's own account
+            string url = JS(JO(cfg, "circularo"), "apiBase").TrimEnd('/') + "/login?returnToken=false&token=" + Uri.EscapeDataString(key);
+            var lr = JParse(Http("GET", url, null, null, 30)[1].Replace(key, "***"));
+            var u = JO(lr, "user");
+            string org = JS(u, "organization"); if (org == "") org = JS(JO(u, "organization"), "id");
+            if (org == "") { string uname = JS(u, "name"); var me = Cx(cfg, key, "GET", "/users/" + Uri.EscapeDataString(uname), null, ref dbg); org = JS(me, "organization"); if (org == "") org = JS(JO(me, "organization"), "id"); }
+            if (org == "") throw new Exception("Could not read the Circularo organization id.");
+            var g = Cx(cfg, key, "GET", "/groups/" + Uri.EscapeDataString(org), null, ref dbg);
+            var res = new Dictionary<string, object>(); res["organization"] = org; res["groups"] = JO(g, "organizationGroups");
+            return res;
+        }
+        private static List<object> CxUsers(object cfg, string key, ref string dbg)
+        {
+            var body = new Dictionary<string, object>(); body["size"] = 500.0; body["from"] = 0.0;
+            var r = Cx(cfg, key, "POST", "/users/search", body, ref dbg);
+            var l = r as List<object> ?? JL(r, "results") ?? JL(r, "items") ?? JL(r, "users") ?? JL(JO(r, "hits"), "hits");
+            var outl = new List<object>();
+            if (l == null) { string t = JSer(r); dbg += "users/search: " + (t.Length > 600 ? t.Substring(0, 600) : t) + " "; return outl; }
+            foreach (var o in l)
+            {
+                var x = JO(o, "_source") ?? o;
+                var u = new Dictionary<string, object>();
+                u["id"] = JS(x, "id") != "" ? JS(x, "id") : JS(o, "_id");
+                u["name"] = JS(x, "name"); u["fullname"] = JS(x, "fullname"); u["mail"] = JS(x, "mail"); u["status"] = JS(x, "status");
+                var gl = JL(x, "group"); u["groups"] = gl ?? new List<object>();
+                outl.Add(u);
+            }
+            return outl;
+        }
+        private static Dictionary<string, object> UserRow(string conn, long userId)
+        {
+            foreach (var u in FirstSet(DbQuery(conn, "cro_api.user_list"))) if (Convert.ToInt64(JN(u, "user_id")) == userId) return u as Dictionary<string, object>;
+            return null;
+        }
+
         // ---- signing link for the caller (must be a recipient of the request) ----
         private static string SignUrl(object cfg, string conn, string key, string email, string resourceId, long requestId, ref string dbg)
         {
@@ -1316,6 +1354,97 @@ namespace Cro
                                + ",\"timeline\":" + DbQuery(conn, "cro_api.request_timeline", "@RequestId", rid, "@Max", 100)
                                + ",\"access\":{\"creator\":" + (creator ? "true" : "false") + ",\"recipient\":" + (recipient ? "true" : "false")
                                + ",\"admin\":" + (admin ? "true" : "false") + ",\"myStatus\":" + JQ(JS(acc, "my_status")) + ",\"email\":" + JQ(em) + "}}";
+                        break;
+                    }
+                    case "circularo_get":
+                    {
+                        // Admin diagnostics: read-only GET of /users, /groups, /documents, /share (key masked).
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string path = Arg(a, "path", 300);
+                        if (!(path.StartsWith("/users") || path.StartsWith("/groups") || path.StartsWith("/documents/") || path.StartsWith("/share/")) || path.Contains("..") || path.Contains("token="))
+                            throw new Exception("Path not allowed.");
+                        result = JSer(Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "GET", path, null, ref dbg));
+                        break;
+                    }
+                    case "users_overview":
+                    {
+                        // Admin: CRO user records + Circularo accounts, matched by Circularo id, username or email.
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string key = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
+                        var cu = CxUsers(cfg, key, ref dbg);
+                        object org = null; try { org = CxOrg(cfg, key, ref dbg); } catch (Exception ex) { dbg += "org: " + Inner(ex) + " "; }
+                        result = "{\"records\":" + DbQuery(conn, "cro_api.user_list") + ",\"circularo\":" + JSer(cu) + ",\"org\":" + (org == null ? "null" : JSer(org))
+                               + ",\"roles\":" + JSer(new List<object> { "sign", "user", "prepare", "read", "admin" }) + "}";
+                        break;
+                    }
+                    case "user_save":
+                    {
+                        // Admin. ARGS: { email, fullName, role, ttaResourceId?, action: "record"|"invite"|"link" }
+                        //  record – CRO record only; invite – create the Circularo account as an invitation (Circularo emails the user to set a password);
+                        //  link – attach an existing Circularo account with this email.
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string actor = who[1] + " (" + who[0] + ")";
+                        string email = Arg(a, "email", 254).ToLowerInvariant(), full = Arg(a, "fullName", 200), role = Arg(a, "role", 20).ToLowerInvariant();
+                        if (full == "") full = email;
+                        var row = FirstRow(DbQuery(conn, "cro_api.user_upsert", "@ActorId", who[0], "@ActorName", who[1], "@TtaResourceId", Nz(Arg(a, "ttaResourceId", 32).ToUpperInvariant()),
+                                                   "@Email", email, "@FullName", full, "@Role", role == "" ? "sign" : role));
+                        long uid = Convert.ToInt64(JN(row, "user_id"));
+                        string action = Arg(a, "action", 10).ToLowerInvariant();
+                        var res = new Dictionary<string, object>(); res["userId"] = (double)uid; res["action"] = action;
+                        if (action == "invite" || action == "link")
+                        {
+                            string key = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
+                            Dictionary<string, object> found = null;
+                            foreach (var c in CxUsers(cfg, key, ref dbg))
+                                if (string.Equals(JS(c, "mail"), email, StringComparison.OrdinalIgnoreCase) || string.Equals(JS(c, "name"), email, StringComparison.OrdinalIgnoreCase)) { found = c as Dictionary<string, object>; break; }
+                            if (found != null)
+                            {
+                                string st = JS(found, "status") == "suspended" ? "suspended" : JS(found, "status") == "newly_created" ? "invited" : "active";
+                                DbQuery(conn, "cro_api.user_set_circularo", "@UserId", uid, "@Status", st, "@CircularoUserId", Nz(JS(found, "id")), "@CircularoUsername", Nz(JS(found, "name")), "@Actor", actor);
+                                res["linked"] = true; res["circularoUsername"] = JS(found, "name"); res["status"] = st;
+                            }
+                            else if (action == "link") throw new Exception("No Circularo account found for " + email + ".");
+                            else
+                            {
+                                var org = CxOrg(cfg, key, ref dbg);
+                                string gid = JS(JO(org, "groups"), role == "" ? "sign" : role); if (gid == "") gid = JS(JO(org, "groups"), "user");
+                                var u = new Dictionary<string, object>();
+                                u["fullname"] = full; u["mail"] = email; u["name"] = email; u["organization"] = JS(org, "organization");
+                                u["group"] = new List<object> { JS(org, "organization"), gid }; u["status"] = "newly_created";
+                                var body = new Dictionary<string, object>(); body["sendMail"] = true; body["users"] = new List<object> { u };
+                                try
+                                {
+                                    var cr = Cx(cfg, key, "POST", "/users", body, ref dbg);
+                                    if (JS(cr, "errors").ToLowerInvariant() == "true") throw new Exception("Circularo reported errors: " + JSer(cr));
+                                    string cid = "";
+                                    foreach (var c in CxUsers(cfg, key, ref dbg)) if (string.Equals(JS(c, "mail"), email, StringComparison.OrdinalIgnoreCase)) { cid = JS(c, "id"); break; }
+                                    DbQuery(conn, "cro_api.user_set_circularo", "@UserId", uid, "@Status", "invited", "@CircularoUserId", Nz(cid), "@CircularoUsername", email, "@Actor", actor);
+                                    res["invited"] = true; res["status"] = "invited";
+                                }
+                                catch (Exception ex)
+                                {
+                                    DbQuery(conn, "cro_api.user_set_circularo", "@UserId", uid, "@Status", "error", "@Error", Inner(ex).Length > 1900 ? Inner(ex).Substring(0, 1900) : Inner(ex), "@Actor", actor);
+                                    throw;
+                                }
+                            }
+                        }
+                        result = JSer(res);
+                        break;
+                    }
+                    case "user_status":
+                    {
+                        // Admin. ARGS: { userId, status: "suspended"|"active" }  PUT /users/{id} {status}
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        long uid; if (!long.TryParse(Arg(a, "userId", 12), out uid)) throw new Exception("userId is required.");
+                        string st = Arg(a, "status", 12).ToLowerInvariant();
+                        if (st != "suspended" && st != "active") throw new Exception("status must be suspended or active.");
+                        var u = UserRow(conn, uid); if (u == null) throw new Exception("User not found.");
+                        string cid = JS(u, "circularo_user_id"); if (cid == "") cid = JS(u, "circularo_username");
+                        if (cid == "") throw new Exception("This user has no Circularo account yet.");
+                        var body = new Dictionary<string, object>(); body["status"] = st;
+                        Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "PUT", "/users/" + Uri.EscapeDataString(cid), body, ref dbg);
+                        DbQuery(conn, "cro_api.user_set_circularo", "@UserId", uid, "@Status", st, "@Actor", who[1] + " (" + who[0] + ")");
+                        result = "{\"userId\":" + uid + ",\"status\":" + JQ(st) + "}";
                         break;
                     }
                     case "user_list":
