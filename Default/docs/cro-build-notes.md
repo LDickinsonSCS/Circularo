@@ -70,12 +70,30 @@ Started: 2026-10-15.
 ## SQL scripts (Default/sql)
 | Script | Purpose | Run (from Default/sql) | Status |
 |---|---|---|---|
-| 000_create_database.sql | Create DB `Circularo` | `sqlcmd -S .\SQLEXPRESS -E -d master -b -I -i 000_create_database.sql` | written, not yet run |
-| 001_schemas.sql | Schemas `cro`, `cro_api`, role `cro_app` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 001_schemas.sql` | written, not yet run |
-| 002_service_login.sql | Login/user for `scs-admin` → `cro_app` (tries domain then machine name; `@override` if needed) | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 002_service_login.sql` | written, not yet run |
-| 003_core_tables.sql | `circularo_user`, `signing_request` (incl. placement/adhoc options), `recipient` (incl. internal mode, share_to, oauth), `webhook_event`, append-only `audit_log` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | written, not yet run |
+| 000_create_database.sql | Create DB `Circularo` | `sqlcmd -S .\SQLEXPRESS -E -d master -b -I -i 000_create_database.sql` | run 2026-10-15 (Leigh) |
+| 001_schemas.sql | Schemas `cro`, `cro_api`, role `cro_app` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 001_schemas.sql` | run 2026-10-15 (Leigh) |
+| 002_service_login.sql | Login/user for `scs-admin` → `cro_app` (tries domain then machine name; `@override` if needed) | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 002_service_login.sql` | run 2026-10-15 (Leigh) |
+| 003_core_tables.sql | `circularo_user`, `signing_request` (incl. placement/adhoc options), `recipient` (incl. internal mode, share_to, oauth), `webhook_event`, append-only `audit_log` |
+| 004_procedures.sql | 16 `cro_api` procedures (health, audit, request create/get/list/set_document/set_shares/set_state/outputs_done/due_check, webhook receive/next/done, user list/upsert/set_circularo); raises compat level to 130 if needed. Parsed clean with sqlfluff (tsql). | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 004_procedures.sql` | written, not yet run | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | written, not yet run |
+
+## Live TTA items (category Circularo)
+| Item | Id | Version | Local source | SHA-256 of live content |
+|---|---|---|---|---|
+| `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | – | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `dde0b48b7b9aec6661fe43438d1b7a3000322fad9ab10134915761b6f7270609` |
+| `CRO_API_KEY` (secure server variable) | `CRO_API_KEY` | – | created by Leigh, value never stored or shown by Claude | – |
+| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 4 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.1.2) | `f84fd904a0518ccca8b6da5635010ecf6efb059825a702dc5291ef52b9017d96` |
+
+`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, keycheck, request_create, request_get, request_list, user_list. Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
 
 ## Decisions & gotchas log
+- 2026-10-15: **Security finding – secure server variables are readable through the client SDK.** A Designer browser session calling `ClientService.GetServerVariableValue('CRO_API_KEY')` got the full 64-char value; only the variable *list* blanks it. Not yet tested with a non-admin forms user. Mitigation proposed: encrypt the key server-side (DPAPI as scs-admin) so the stored value is useless off the server. Applies equally to DP project secrets.
+- 2026-10-15: Server-side, C# reads the key with `TotalAgility.Sdk.ClientService.GetServerVariableValue(systemSession, "CRO_API_KEY")`, so CRO processes need **no secure input mapping** and Claude can keep saving them.
+- 2026-10-15: Verified live from TTA: SQL connection to `Circularo` as the TTA service works (004 procs not yet present); Circularo `/ping` → 200; `/login?token=<key>` → logged True as support@sudocodesolutions.com, tenant `sandbox`.
+- TTA SDK: `AddServerVariable` needs a `Grouping` object (`{Identity:{Id:'4FEE4E069417475DAC5D2C2E5C95CA49'},Category:{Id:'201F370CA5164F76ADDD8EEEFF666AF7'}}` = Default Data Grouping); `Grouping:null` gives a null-reference 500.
+- TTA SDK: `ProcessService.CreateProcessBasedOnExisting {baseProcessIdentity, processName}` returns null and puts the copy in the **base process's category**; set `Data.Category` before the first save.
+- TTA SDK: `CreateJobSync` `ReturnedVariables` carry no Id – read them by position in the order of `variablesToReturn`.
+- TTA SDK: writes from the Designer also send `CSRFDesignerToken` (cookie) and `DesignerMode` headers; added to the helper, though the server-variable failure turned out to be the Grouping.
+- TTA stores JSON exactly as sent; the live config is the `JSON.stringify` form (e.g. `0.0` → `0`), so hash the minified copy.
 - 2026-10-15: Prefix CRO agreed.
 - 2026-10-15: Category, sandbox, SQL DB, signer scope agreed.
 - 2026-10-15: Users, embedded signing, anchors, email OTP, webhooks+polling agreed (see Settled).
