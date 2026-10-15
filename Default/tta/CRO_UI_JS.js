@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.3.0';
+  var VERSION = 'cro-ui 0.3.1';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -686,7 +686,9 @@
               }).join('') : '<div class="cro-empty">' + (R.state === 'completed' ? 'Not stored yet – the sync fetches them within a few minutes.' : 'Available when everyone has signed.') + '</div>') + '</div>' +
             '<div class="cro-card"><h2>History</h2><ul class="cro-act">' + (TL.length ? TL.map(function (t) {
                 var c = t.outcome === 'ok' ? (t.source === 'circularo' ? '#12B76A' : '#4E3FD8') : '#F04438';
-                return '<li><span class="cro-dot" style="background:' + c + '"></span><span class="t" title="' + esc(when(t.at_utc)) + '">' + esc(ago(t.at_utc)) + '</span><span><b>' + esc(t.what) + '</b>' + (t.who ? ' · ' + esc(who(t.who)) : '') +
+                var what = { output_saved: 'File stored', request_set_document: 'Uploaded to Circularo', request_set_shares: 'Shared with recipients', request_detail: 'Access refused', webhook_receive: 'Webhook received' }[t.what] || t.what;
+                if (t.what === 'output_saved' && t.detail) what += ' – ' + String(t.detail).split(/[;,]/)[0];
+                return '<li><span class="cro-dot" style="background:' + c + '"></span><span class="t" title="' + esc(when(t.at_utc)) + '">' + esc(ago(t.at_utc)) + '</span><span><b>' + esc(what) + '</b>' + (t.who ? ' · ' + esc(who(t.who)) : '') +
                   (t.outcome !== 'ok' ? ' <span class="cro-pill cro-badc">' + esc(t.outcome) + '</span>' : '') + (t.detail && t.outcome !== 'ok' ? '<div class="cro-sub">' + esc(String(t.detail).slice(0, 200)) + '</div>' : '') + '</span></li>';
               }).join('') : '<li class="cro-empty">Nothing yet.</li>') + '</ul></div>' +
           '</div>';
