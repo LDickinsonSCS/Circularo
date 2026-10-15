@@ -190,7 +190,7 @@
   var volume = function (rows) {
     var W = 720, H = 220, L = 34, B = 26, T = 10, n = Math.max(rows.length, 1);
     var max = 1; rows.forEach(function (r) { max = Math.max(max, r.sent || 0, r.completed || 0); });
-    var step = (W - L - 8) / n, bw = Math.max(2, Math.min(14, step / 2 - 2));
+    var step = (W - L - 26) / n, bw = Math.max(2, Math.min(14, step / 2 - 2));
     var y = function (v) { return T + (H - T - B) * (1 - v / max); };
     var g = '';
     var ticks = max <= 4 ? max : 4;
