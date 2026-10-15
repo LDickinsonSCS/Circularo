@@ -121,6 +121,7 @@ Started: 2026-10-15.
 - GitHub repo moved to `LDickinsonSCS/Circularo` (capital C); remote updated.
 
 ## Verified
+- 2026-10-15 22:37–22:38: **Fully automatic completion.** Leigh signed request 3 → Circularo events arrived (valid HMAC) → scheduled CRO Sync at 18:37:58Z marked it completed, recipient signed, and stored outputs by 18:38:04Z (signed 71,792 bytes with signature; audit; certificate). No manual calls.
 - 2026-10-15 22:34: Receiver live: GET → `{"service":"cro-webhook","ok":true}`; POST with a bad signature → 200 (stored, flagged invalid).
 - 2026-10-15 22:34–22:36: **Webhook chain proven.** Request 3 (NDA, doc `52dfd1f7-e99a-44d8-b7cc-9ac74c6e7e49`, share `E_TYQKEB_eIBv4MnOEEF`): 2 events arrived from Circularo with **valid HMAC** and matched to the request; the scheduled CRO Sync job processed them at 18:35:57Z (`last_event_utc` set, `last_checked_utc` null → no polling involved).
 - 2026-10-15 21:27: `request_outputs` for requests 1 and 2 → 3 files each stored in `cro.output_file` (signed 72,207 / 82,490 bytes with signature; audit; certificate). `output_get` round-trip SHA-256 matches (`e3a8a456…`). Audit trail is generated per request (size/hash vary slightly between downloads).
