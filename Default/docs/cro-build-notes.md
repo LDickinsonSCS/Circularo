@@ -88,7 +88,7 @@ Started: 2026-10-15.
 | `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | 3 (released) | same script as CRO API; process variable `CRO_RUNMODE=sync` (not an input) | live `41749d44f49c…` |
 | Job schedule `CRO Sync - every 2 minutes` | ScheduleId `A67CA440EF924666B53D4ADEC15FCABD` | active | – | – |
 | Circularo webhook | `4PSeQKEB_eIBv4MnskB-` (organization) | – | callback `https://portal.sudocodesolutions.com/cro-webhook/receive.ashx`; HMAC secret DPAPI in `cro.secret` (fingerprint `2c8bb95309136469`) | – |
-| Webhook receiver (IIS) | – | **to deploy (Leigh)** | `Default/webhook/receive.ashx`, `web.config`, `README.md` | – |
+| Webhook receiver (IIS) | app `cro-webhook` on portal | deployed 2026-10-15 (Leigh) | `Default/webhook/receive.ashx`, `web.config`, `README.md` | – |
 
 `CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, request_outputs, output_list, output_get, sync_now*, webhook_list*, webhook_setup*, webhook_delete*, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
 
@@ -121,6 +121,8 @@ Started: 2026-10-15.
 - GitHub repo moved to `LDickinsonSCS/Circularo` (capital C); remote updated.
 
 ## Verified
+- 2026-10-15 22:34: Receiver live: GET → `{"service":"cro-webhook","ok":true}`; POST with a bad signature → 200 (stored, flagged invalid).
+- 2026-10-15 22:34–22:36: **Webhook chain proven.** Request 3 (NDA, doc `52dfd1f7-e99a-44d8-b7cc-9ac74c6e7e49`, share `E_TYQKEB_eIBv4MnOEEF`): 2 events arrived from Circularo with **valid HMAC** and matched to the request; the scheduled CRO Sync job processed them at 18:35:57Z (`last_event_utc` set, `last_checked_utc` null → no polling involved).
 - 2026-10-15 21:27: `request_outputs` for requests 1 and 2 → 3 files each stored in `cro.output_file` (signed 72,207 / 82,490 bytes with signature; audit; certificate). `output_get` round-trip SHA-256 matches (`e3a8a456…`). Audit trail is generated per request (size/hash vary slightly between downloads).
 - 2026-10-15 21:32: webhook registered (organization scope). `CRO Sync` test job completed (0 events, nothing due). Schedule created.
 - 2026-10-15 21:22: Leigh signed both test requests. `request_refresh` → both **completed**, recipients signed. Direct check of outputs (browser session): signed PDF 72 KB / 82 KB with 1 `/Sig` + `/ByteRange`; audit trail ~351 KB and Certificate of Fulfillment (`/audit?cof=true`) ~384 KB, both sealed PDFs. Signed hash differs from the original (re-read before download).
