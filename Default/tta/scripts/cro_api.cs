@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.4.0";
+        private const string VERSION = "cro-api 0.5.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -766,6 +766,90 @@ namespace Cro
             return JSer(res);
         }
 
+        // ---- background sync (CRO Sync process, run mode "sync") ----
+        // 1. webhook inbox: refresh each request that has unprocessed events, mark events done
+        // 2. polling safety net: requests with no event for a while, near deadline, or completed without outputs
+        private static string Sync(object cfg, string conn, string key, ref string dbg)
+        {
+            var sc = JO(cfg, "sync");
+            int batch = (int)(JN(sc, "batch") > 0 ? JN(sc, "batch") : 50);
+            var log = new List<object>();
+            var done = new HashSet<long>();
+            int ok = 0, failed = 0;
+            var events = FirstSet(DbQuery(conn, "cro_api.webhook_next", "@Max", batch));
+            var byReq = new Dictionary<long, List<long>>();
+            foreach (var e in events)
+            {
+                long rid = Convert.ToInt64(JN(e, "request_id")), eid = Convert.ToInt64(JN(e, "event_id"));
+                if (!byReq.ContainsKey(rid)) byReq[rid] = new List<long>();
+                byReq[rid].Add(eid);
+            }
+            foreach (var kv in byReq)
+            {
+                string outcome;
+                try { outcome = SyncOne(cfg, conn, key, kv.Key, "webhook", ref dbg); ok++; }
+                catch (Exception ex) { outcome = "error: " + Inner(ex); failed++; }
+                foreach (var eid in kv.Value) DbQuery(conn, "cro_api.webhook_done", "@EventId", eid, "@Result", outcome.Length > 1900 ? outcome.Substring(0, 1900) : outcome);
+                done.Add(kv.Key);
+                var l = new Dictionary<string, object>(); l["requestId"] = (double)kv.Key; l["via"] = "webhook"; l["events"] = (double)kv.Value.Count; l["result"] = outcome; log.Add(l);
+            }
+            var due = FirstSet(DbQuery(conn, "cro_api.requests_due_check",
+                "@StaleMinutes", (int)(JN(sc, "pollStaleMinutes") > 0 ? JN(sc, "pollStaleMinutes") : 30),
+                "@NearDeadlineMinutes", (int)(JN(sc, "nearDeadlineMinutes") > 0 ? JN(sc, "nearDeadlineMinutes") : 1440),
+                "@NearDeadlineEvery", (int)(JN(sc, "nearDeadlineEveryMinutes") > 0 ? JN(sc, "nearDeadlineEveryMinutes") : 5),
+                "@Max", batch));
+            foreach (var d in due)
+            {
+                long rid = Convert.ToInt64(JN(d, "request_id"));
+                if (done.Contains(rid)) continue;
+                string outcome;
+                try { outcome = SyncOne(cfg, conn, key, rid, "poll", ref dbg); ok++; }
+                catch (Exception ex) { outcome = "error: " + Inner(ex); failed++; }
+                var l = new Dictionary<string, object>(); l["requestId"] = (double)rid; l["via"] = "poll"; l["result"] = outcome; log.Add(l);
+            }
+            var res = new Dictionary<string, object>();
+            res["events"] = (double)events.Count; res["requests"] = (double)log.Count; res["ok"] = (double)ok; res["failed"] = (double)failed; res["log"] = log;
+            return JSer(res);
+        }
+        // Refresh one request; when completed, fetch the outputs if not yet stored.
+        private static string SyncOne(object cfg, string conn, string key, long rid, string source, ref string dbg)
+        {
+            var req = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
+            if (req == null) return "request not found";
+            string state = JS(req, "state");
+            if (state == "inprogress" || state == "sending" || (state == "completed" && JS(req, "outputs_retrieved_utc") == ""))
+            {
+                if (state != "completed")
+                {
+                    var r = JParse(RefreshRequest(cfg, conn, key, rid, source, ref dbg));
+                    state = JS(r, "state");
+                }
+                if (state == "completed")
+                {
+                    req = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
+                    if (JS(req, "outputs_retrieved_utc") == "")
+                    {
+                        var o = JParse(FetchOutputs(cfg, conn, key, rid, ref dbg));
+                        return "completed; outputs " + (JS(o, "complete").ToLowerInvariant() == "true" ? "stored" : "incomplete");
+                    }
+                }
+                return state;
+            }
+            return "skipped (" + state + ")";
+        }
+        private static List<object> FirstSet(string dbJson)
+        {
+            var sets = JParse(dbJson) as List<object>;
+            return (sets != null && sets.Count > 0 && sets[0] is List<object>) ? (List<object>)sets[0] : new List<object>();
+        }
+        private static string RandomHex(int bytes)
+        {
+            var b = new byte[bytes];
+            using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create()) rng.GetBytes(b);
+            var sb = new StringBuilder(); foreach (var x in b) sb.Append(x.ToString("x2")); return sb.ToString();
+        }
+        private static string InSafe(ScriptParameters sp, string k) { try { return In(sp, k); } catch (Exception) { return ""; } }
+
         // ---- secure server variable probe (never returns the value) ----
         // Looks through the server-side SDK for any method that reads a server variable and tries it with the
         // system session. Reports only whether a value came back and its length.
@@ -824,6 +908,13 @@ namespace Cro
                 string conn = DbConn(cfg);
                 object a = JParse(In(sp, "ARGS") == "" ? "{}" : In(sp, "ARGS"));
 
+                // CRO Sync runs this same script with the process variable CRO_RUNMODE = "sync" (not an input, so callers cannot set it).
+                if (InSafe(sp, "CRO_RUNMODE") == "sync")
+                {
+                    result = Sync(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), ref dbg);
+                    sp.OutputVariables["RESULT"] = result; sp.OutputVariables["ERROR"] = error; sp.OutputVariables["DEBUG"] = dbg;
+                    return;
+                }
                 var who = Caller(In(sp, "SESSIONTOKEN").Trim().ToUpperInvariant(), ref dbg);
                 if (who == null) throw new Exception("Could not identify the signed-in user.");
 
@@ -988,6 +1079,54 @@ namespace Cro
                         }
                         catch (TargetInvocationException e) { throw new Exception(Inner(e)); }
                         finally { try { ((IDisposable)c).Dispose(); } catch (Exception) { } }
+                        break;
+                    }
+                    case "sync_now":
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        result = Sync(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), ref dbg);
+                        break;
+                    case "webhook_list":
+                    {
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        var wl = Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "GET", "/webhooks", null, ref dbg);
+                        var rl = JL(wl, "results");
+                        if (rl != null) foreach (var w in rl) { var d = w as Dictionary<string, object>; if (d != null && d.ContainsKey("hmacSecret")) d["hmacSecret"] = d["hmacSecret"] == null ? null : (object)"***"; }
+                        result = JSer(wl);
+                        break;
+                    }
+                    case "webhook_setup":
+                    {
+                        // ARGS: { callbackUrl?, type? }  Generates a new HMAC secret (stored DPAPI-encrypted, never returned) and registers the webhook.
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string key = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
+                        string url = Arg(a, "callbackUrl", 400); if (url == "") url = JS(JO(cfg, "webhook"), "receiverUrl");
+                        if (!url.StartsWith("https://")) throw new Exception("The callback URL must be https.");
+                        string secret = RandomHex(32);
+                        string b64 = Convert.ToBase64String(Dpapi(true, Encoding.UTF8.GetBytes(secret)));
+                        DbQuery(conn, "cro_api.secret_set", "@Name", "webhook_hmac_secret", "@ProtectedB64", b64, "@Fingerprint", Fingerprint(secret),
+                                "@ValueLength", secret.Length, "@MachineName", Environment.MachineName, "@Actor", who[1] + " (" + who[0] + ")");
+                        var tried = new List<object>(); object created = null;
+                        string want = Arg(a, "type", 20);
+                        foreach (var type in (want != "" ? new[] { want } : new[] { "organization", "team", "tenant" }))
+                        {
+                            var body = new Dictionary<string, object>(); body["type"] = type; body["callbackUrl"] = url; body["hmacSecret"] = secret;
+                            try { created = Cx(cfg, key, "POST", "/webhooks", body, ref dbg); tried.Add(type + ": ok"); break; }
+                            catch (Exception ex) { tried.Add(type + ": " + Inner(ex).Replace(secret, "***")); }
+                        }
+                        var res = new Dictionary<string, object>();
+                        res["registered"] = created != null; res["tried"] = tried; res["callbackUrl"] = url; res["secretFingerprint"] = Fingerprint(secret);
+                        if (created != null) { res["id"] = JS(created, "id"); res["type"] = JS(created, "type"); res["name"] = JS(created, "name"); }
+                        result = JSer(res);
+                        DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "webhook_setup", "@Outcome", created != null ? "ok" : "error", "@Detail", url + " " + string.Join("; ", Array.ConvertAll(tried.ToArray(), x => Convert.ToString(x))));
+                        break;
+                    }
+                    case "webhook_delete":
+                    {
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string id = Arg(a, "id", 64); if (id == "") throw new Exception("id is required.");
+                        Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "DELETE", "/webhooks/" + Uri.EscapeDataString(id), null, ref dbg);
+                        DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "webhook_delete", "@Outcome", "ok", "@Detail", id);
+                        result = "{\"deleted\":" + JQ(id) + "}";
                         break;
                     }
                     case "user_list":

@@ -75,20 +75,29 @@ Started: 2026-10-15.
 | 002_service_login.sql | Login/user for `scs-admin` → `cro_app` (tries domain then machine name; `@override` if needed) | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 002_service_login.sql` | run 2026-10-15 (Leigh) |
 | 003_core_tables.sql | `circularo_user`, `signing_request` (incl. placement/adhoc options), `recipient` (incl. internal mode, share_to, oauth), `webhook_event`, append-only `audit_log` |
 | 003a_option_columns.sql | Adds placement/adhoc_option/placement_used, share_to/internal_mode, oauth protection to tables made by the first 003 | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003a_option_columns.sql` | run 2026-10-15 (Leigh) |
-| 004_procedures.sql | 16 `cro_api` procedures (health, audit, request create/get/list/set_document/set_shares/set_state/outputs_done/due_check, webhook receive/next/done, user list/upsert/set_circularo); raises compat level to 130 if needed. Parsed clean with sqlfluff (tsql). | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 004_procedures.sql` | run 2026-10-15 (Leigh); **re-run needed** for the acted_utc fix |
-| 006_outputs.sql | `cro.output_file` (signed / audit / certificate PDFs, sha256, has_signature) + `output_save/list/get` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 006_outputs.sql` | written, not yet run |
+| 004_procedures.sql | 16 `cro_api` procedures (health, audit, request create/get/list/set_document/set_shares/set_state/outputs_done/due_check, webhook receive/next/done, user list/upsert/set_circularo); raises compat level to 130 if needed. Parsed clean with sqlfluff (tsql). | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 004_procedures.sql` | run 2026-10-15 (Leigh), re-run 21:27 with the acted_utc fix |
+| 006_outputs.sql | `cro.output_file` (signed / audit / certificate PDFs, sha256, has_signature) + `output_save/list/get` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 006_outputs.sql` | run 2026-10-15 (Leigh) |
 | 005_secrets.sql | `cro.secret` (DPAPI ciphertext, fingerprint) + `secret_set/get/status` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 005_secrets.sql` | written, not yet run | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | run 2026-10-15 (Leigh) |
 
 ## Live TTA items (category Circularo)
 | Item | Id | Version | Local source | SHA-256 of live content |
 |---|---|---|---|---|
-| `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | config v2 (adds `admins`) | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `605e18026849248f0e0eec8f26679c5d99190be650cc8f1de2574cd64c413452` |
+| `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | config v3 (admins, receiver URL) | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `9cdf37a0d2a3252adefc5dd5146e9bd56fae815c45e3c96a1b77489549317b7a` |
 | `CRO_API_KEY` (secure server variable) | `CRO_API_KEY` | – | entry point only: Leigh enters a key, `key_migrate` encrypts it into `cro.secret`, then the variable is blanked | – |
-| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 8 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.4.0) | `1783b0b57da92f8edae86a70353ded9b3dc45c6a315f2e49f82876377040fc40` |
+| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 9 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.5.0) | `3d643995e21b714fef3ddf0956290bd5af5945c6fd65b796863026ffa730cfbb` (file); live = file without final newline `41749d44f49c…` |
+| `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | 3 (released) | same script as CRO API; process variable `CRO_RUNMODE=sync` (not an input) | live `41749d44f49c…` |
+| Job schedule `CRO Sync - every 2 minutes` | ScheduleId `A67CA440EF924666B53D4ADEC15FCABD` | active | – | – |
+| Circularo webhook | `4PSeQKEB_eIBv4MnskB-` (organization) | – | callback `https://portal.sudocodesolutions.com/cro-webhook/receive.ashx`; HMAC secret DPAPI in `cro.secret` (fingerprint `2c8bb95309136469`) | – |
+| Webhook receiver (IIS) | – | **to deploy (Leigh)** | `Default/webhook/receive.ashx`, `web.config`, `README.md` | – |
 
-`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, request_outputs, output_list, output_get, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
+`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, request_outputs, output_list, output_get, sync_now*, webhook_list*, webhook_setup*, webhook_delete*, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
 
 ## Decisions & gotchas log
+- 2026-10-15: **TTA strips the final newline of a script on save** – compare hashes of the trimmed text (live CRO API = file minus trailing `\n`).
+- 2026-10-15: `CreateProcessBasedOnExisting` copies the **released** version of the base; set the node script explicitly on the copy.
+- 2026-10-15: CRO Sync = same script as CRO API in an async process with process variable `CRO_RUNMODE=sync`, which is **not** in `Data.InputVariables`, so no caller can switch CRO API into sync mode.
+- 2026-10-15: Webhook create as org admin works with `type:"organization"`; `GET /webhooks` returns `hmacSecret` in clear (masked by `webhook_list`).
+- 2026-10-15: Job schedules: `ServerService.AddJobSchedule {jobSchedule}` – copy an existing schedule's shape (`TimeSpanInMinutes`, `OneActiveAtTime`, `StartByDate` as `/Date(ms+0400)/`).
 - 2026-10-15: **Circularo resolves an email that belongs to an internal user to that user** (ldickinson@… → `ldickinson@sudocodesolutions.com.1`, type internal), even when shared as external with OTP. Status must be matched by **shareId** (present in `workflow.waitingFor[]`), never by username – fixed in cro-api 0.3.1 after the first refresh wrongly showed "signed".
 - 2026-10-15: `request_set_state` now clears `recipient.acted_utc` when a status goes back to waiting/pending (fix in 004; re-run 004).
 - 2026-10-15: `POST /documents` returned the id under `id`; folder path `TTA/CRO` auto-created. `signatureAnchors` sent as a JSON string multipart field works. Date annotations are off by default (`defaults.annotations` absent) until the annotation field format is verified.
@@ -112,6 +121,8 @@ Started: 2026-10-15.
 - GitHub repo moved to `LDickinsonSCS/Circularo` (capital C); remote updated.
 
 ## Verified
+- 2026-10-15 21:27: `request_outputs` for requests 1 and 2 → 3 files each stored in `cro.output_file` (signed 72,207 / 82,490 bytes with signature; audit; certificate). `output_get` round-trip SHA-256 matches (`e3a8a456…`). Audit trail is generated per request (size/hash vary slightly between downloads).
+- 2026-10-15 21:32: webhook registered (organization scope). `CRO Sync` test job completed (0 events, nothing due). Schedule created.
 - 2026-10-15 21:22: Leigh signed both test requests. `request_refresh` → both **completed**, recipients signed. Direct check of outputs (browser session): signed PDF 72 KB / 82 KB with 1 `/Sig` + `/ByteRange`; audit trail ~351 KB and Certificate of Fulfillment (`/audit?cof=true`) ~384 KB, both sealed PDFs. Signed hash differs from the original (re-read before download).
 - 2026-10-15 21:14: **First end-to-end send.** Request 1 = sample 01 NDA, anchors, external recipient ldickinson@sudocodesolutions.com (email OTP). Upload → anchor `SIG_RECIPIENT` matched on page 2 → field at x 0.47532, y 0.23599, 0.22×0.045 (as predicted by the sample preview) → document `b6042b53-9a42-402f-856d-5830cef2f065` in folder TTA/CRO → share `hfSOQKEB_eIBv4Mnx0Ac`. Refresh: inprogress, waiting.
 - 2026-10-15 21:20: **Ad hoc send.** Request 2 = sample 06 memo, placement adhoc/default_position → 1 field on last page → document `15126ba2-62a2-4678-bc1b-c95df0928235`, share `mvSQQKEB_eIBv4MnQECE`.

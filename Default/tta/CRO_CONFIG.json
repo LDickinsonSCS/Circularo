@@ -1,5 +1,5 @@
 {
- "version": 2,
+ "version": 3,
  "note": "CRO configuration. Read-only at runtime. No secrets here: the Circularo API key is the secure server variable CRO_API_KEY.",
  "circularo": {
   "apiBase": "https://sudocode.sandbox.circularo.com/api/v1",
@@ -112,7 +112,7 @@
  },
  "webhook": {
   "enabled": true,
-  "receiverUrl": "https://portal.sudocodesolutions.com/cro-webhook/",
+  "receiverUrl": "https://portal.sudocodesolutions.com/cro-webhook/receive.ashx",
   "registered": false
  },
  "groups": {
