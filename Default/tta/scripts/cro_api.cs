@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.1.2";
+        private const string VERSION = "cro-api 0.2.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -265,8 +265,29 @@ namespace Cro
                 return new[] { ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture), rd.ReadToEnd() };
         }
 
-        // ---- Circularo API key: read server-side with the system session; never returned or logged ----
-        private static string ApiKey(string systemSession)
+        // ---- secrets: DPAPI (machine scope + CRO entropy) ciphertext in SQL; plain values never stored or returned ----
+        private const string ENTROPY = "CRO.Circularo.secret.v1";
+        private static byte[] Dpapi(bool protect, byte[] data)
+        {
+            var pd = Type.GetType("System.Security.Cryptography.ProtectedData, System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a", false);
+            var sc = Type.GetType("System.Security.Cryptography.DataProtectionScope, System.Security, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a", false);
+            if (pd == null || sc == null) throw new Exception("Windows DPAPI is not available to scripts.");
+            var m = pd.GetMethod(protect ? "Protect" : "Unprotect", BindingFlags.Public | BindingFlags.Static);
+            try { return (byte[])m.Invoke(null, new object[] { data, Encoding.UTF8.GetBytes(ENTROPY), Enum.Parse(sc, "LocalMachine") }); }
+            catch (TargetInvocationException e) { throw new Exception("DPAPI " + (protect ? "protect" : "unprotect") + " failed: " + Inner(e)); }
+        }
+        private static string Fingerprint(string plain)
+        {
+            using (var h = System.Security.Cryptography.SHA256.Create())
+            {
+                var b = h.ComputeHash(Encoding.UTF8.GetBytes(plain));
+                var sb = new StringBuilder();
+                for (int i = 0; i < 8; i++) sb.Append(b[i].ToString("x2"));
+                return sb.ToString();
+            }
+        }
+        // Plain value of the secure server variable (system session, server-side only). Used to migrate it into the store.
+        private static string SecureVar(string systemSession, string varId)
         {
             var svc = new TotalAgility.Sdk.ClientService();
             object v = null;
@@ -274,12 +295,40 @@ namespace Cro
             {
                 var ps = mi.GetParameters();
                 if (mi.Name == "GetServerVariableValue" && ps.Length == 2 && ps[0].ParameterType == typeof(string) && ps[1].ParameterType == typeof(string))
-                { v = mi.Invoke(svc, new object[] { systemSession, "CRO_API_KEY" }); break; }
+                { v = mi.Invoke(svc, new object[] { systemSession, varId }); break; }
             }
             object val = v is string ? v : GetP(v, "Value");
-            string key = val == null ? "" : Convert.ToString(val, CultureInfo.InvariantCulture).Trim();
-            if (key.Length < 16) throw new Exception("The Circularo API key (CRO_API_KEY) is not set.");
-            return key;
+            return val == null ? "" : Convert.ToString(val, CultureInfo.InvariantCulture).Trim();
+        }
+        private static Dictionary<string, object> FirstRow(string dbJson)
+        {
+            var sets = JParse(dbJson) as List<object>;
+            if (sets == null || sets.Count == 0) return null;
+            var rows = sets[0] as List<object>;
+            return (rows == null || rows.Count == 0) ? null : rows[0] as Dictionary<string, object>;
+        }
+        // The Circularo API key: from the encrypted store; falls back to the secure variable only until migrated.
+        private static string ApiKey(string conn, string systemSession, ref string dbg)
+        {
+            Dictionary<string, object> row = null;
+            try { row = FirstRow(DbQuery(conn, "cro_api.secret_get", "@Name", "circularo_api_key")); }
+            catch (Exception e) { dbg += "Secret store unavailable: " + Inner(e) + " "; }
+            if (row != null)
+            {
+                string key = Encoding.UTF8.GetString(Dpapi(false, Convert.FromBase64String(JS(row, "protected_b64"))));
+                if (key.Length >= 16) return key;
+            }
+            string plain = SecureVar(systemSession, "CRO_API_KEY");
+            if (plain.Length < 16) throw new Exception("The Circularo API key is not set (run key_migrate after entering it in CRO_API_KEY).");
+            dbg += "API key read from CRO_API_KEY (not yet migrated to the encrypted store). ";
+            return plain;
+        }
+        private static bool IsAdmin(object cfg, string resourceId)
+        {
+            var l = JL(cfg, "admins");
+            if (l == null) return false;
+            foreach (var x in l) if (string.Equals(Convert.ToString(x), resourceId, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
         }
 
         // ---- secure server variable probe (never returns the value) ----
@@ -379,7 +428,7 @@ namespace Cro
                     case "circularo_check":
                     {
                         // Confirms the API key works: token check as documented (GET /login?token=...). Never echoes the key.
-                        string key = ApiKey(In(sp, "SPP_SYSTEM_SESSION_ID"));
+                        string key = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
                         string url = JS(JO(cfg, "circularo"), "apiBase").TrimEnd('/') + "/login?returnToken=false&token=" + Uri.EscapeDataString(key);
                         var r = Http("GET", url, null, null, 30);
                         object j = JParse(r[1]);
@@ -393,7 +442,30 @@ namespace Cro
                         result = JSer(info).Replace(key, "***");
                         break;
                     }
+                    case "key_migrate":
+                    {
+                        // Moves the key from the secure variable into the encrypted store. Admins only.
+                        if (!IsAdmin(cfg, who[0])) { DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "key_migrate", "@Outcome", "refused", "@Detail", "Not a CRO administrator"); throw new Exception("Only CRO administrators can do this."); }
+                        string plain = SecureVar(In(sp, "SPP_SYSTEM_SESSION_ID"), "CRO_API_KEY");
+                        if (plain.Length < 16) throw new Exception("CRO_API_KEY is empty: enter the key there first.");
+                        string b64 = Convert.ToBase64String(Dpapi(true, Encoding.UTF8.GetBytes(plain)));
+                        if (Encoding.UTF8.GetString(Dpapi(false, Convert.FromBase64String(b64))) != plain) throw new Exception("Encryption round-trip check failed.");
+                        string fp = Fingerprint(plain);
+                        DbQuery(conn, "cro_api.secret_set", "@Name", "circularo_api_key", "@ProtectedB64", b64, "@Fingerprint", fp,
+                                "@ValueLength", plain.Length, "@MachineName", Environment.MachineName, "@Actor", who[1] + " (" + who[0] + ")");
+                        result = "{\"stored\":true,\"fingerprint\":" + JQ(fp) + ",\"length\":" + plain.Length + ",\"machine\":" + JQ(Environment.MachineName) + "}";
+                        break;
+                    }
+                    case "key_status":
+                    {
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string sv = SecureVar(In(sp, "SPP_SYSTEM_SESSION_ID"), "CRO_API_KEY");
+                        result = "{\"store\":" + DbQuery(conn, "cro_api.secret_status") + ",\"secureVariableHasValue\":" + (sv.Length > 0 ? "true" : "false")
+                               + ",\"machine\":" + JQ(Environment.MachineName) + "}";
+                        break;
+                    }
                     case "keycheck":
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
                         result = KeyCheck(In(sp, "SPP_SYSTEM_SESSION_ID"), "CRO_API_KEY");
                         break;
                     case "request_create":
