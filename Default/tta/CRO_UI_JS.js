@@ -197,13 +197,13 @@
     for (var i = 0; i <= ticks; i++) { var v = Math.round(max * i / ticks); g += '<line x1="' + L + '" x2="' + (W - 4) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="#EAECF0"/><text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + v + '</text>'; }
     rows.forEach(function (r, i) {
       var x = L + i * step + step / 2, d = asDate(r.day);
-      var lab = d ? d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '';
+      var lab = d ? d.getUTCDate() + ' ' + 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[d.getUTCMonth()] : '';
       if (r.sent) g += '<rect x="' + (x - bw - 1) + '" y="' + y(r.sent) + '" width="' + bw + '" height="' + (H - B - y(r.sent)) + '" rx="2" fill="#4E3FD8"><title>' + esc(lab + ' sent: ' + r.sent) + '</title></rect>';
       if (r.completed) g += '<rect x="' + (x + 1) + '" y="' + y(r.completed) + '" width="' + bw + '" height="' + (H - B - y(r.completed)) + '" rx="2" fill="#12B76A"><title>' + esc(lab + ' completed: ' + r.completed) + '</title></rect>';
       var every = Math.ceil(n / 8);
-      if (i % every === 0 || i === n - 1) g += '<text x="' + x + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="#667085">' + esc(lab) + '</text>';
+      if ((n - 1 - i) % every === 0) g += '<text x="' + x + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="#667085">' + esc(lab) + '</text>';
     });
-    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="none" style="max-height:240px">' + g + '</svg>';
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-height:240px">' + g + '</svg>';
   };
 
   /* ---------- dashboard ---------- */
