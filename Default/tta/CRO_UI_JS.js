@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.2.2';
+  var VERSION = 'cro-ui 0.3.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -153,6 +153,16 @@
     '.cro-btn{background:var(--cro-acc);color:#fff;border:1px solid var(--cro-acc)}.cro-btn:disabled{opacity:.6;cursor:wait}',
     '.cro-btn2{background:#fff;color:var(--cro-ink);border:1px solid #D0D5DD}.cro-btn2:hover{background:var(--cro-bg)}',
     '.cro-done{text-align:center;padding:40px}.cro-done .big{width:64px;height:64px;border-radius:50%;background:#D1FADF;color:#039855;font-size:32px;display:grid;place-items:center;margin:0 auto 12px}.cro-done h1{margin:0 0 6px;font-size:22px}',
+    '.cro-chips{display:flex;flex-wrap:wrap;gap:8px;margin:-4px 0 16px}.cro-chips button{font:inherit;font-size:13px;border:1px solid #D0D5DD;background:#fff;color:var(--cro-sub);border-radius:999px;padding:6px 12px;cursor:pointer}',
+    '.cro-chips button.on{background:var(--cro-acc);border-color:var(--cro-acc);color:#fff}',
+    '.cro-tools{display:flex;gap:10px;margin-bottom:12px}.cro-list td{vertical-align:middle}',
+    '.cro-title{color:var(--cro-ink);font-weight:600;text-decoration:none}.cro-title:hover{color:var(--cro-acc)}.cro-sub{color:var(--cro-mute);font-size:12px;margin-top:2px}',
+    '.cro-sm{padding:5px 10px;font-size:12px}.cro-pager{display:flex;justify-content:space-between;align-items:center;padding-top:12px;color:var(--cro-sub);font-size:13px}',
+    '.cro-crumb{margin:-8px 0 8px}.cro-crumb a{color:var(--cro-sub);text-decoration:none;font-size:13px}.cro-crumb a:hover{color:var(--cro-acc)}',
+    '.cro-h1 h1 .cro-pill{vertical-align:middle;margin-left:6px;font-size:12px}',
+    '.cro-danger{color:var(--cro-bad)}.cro-dangerbtn{background:var(--cro-bad);border-color:var(--cro-bad)}.cro-confirm{border-color:#FDA29B;background:#FFFBFA;margin-bottom:16px}',
+    '.cro-file{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--cro-line)}.cro-file:last-child{border-bottom:0}',
+    '.cro-mono{font-family:Consolas,monospace;font-weight:400}',
     '.cro-foot{color:var(--cro-mute);font-size:12px;text-align:center;padding:24px}',
     'svg text{font-family:"Segoe UI",Arial,sans-serif}'
   ].join('\n');
@@ -559,6 +569,150 @@
     }).catch(fail);
   };
 
+  /* ---------- requests list ---------- */
+  var FILTERS = [['all', 'All'], ['assigned', 'Assigned to me'], ['waiting', 'Waiting for others'], ['completed', 'Completed'],
+    ['deadline', 'Approaching deadline'], ['attention', 'Needs attention'], ['sent', 'Sent by me']];
+  var RSTATUS = { pending: ['Not yet', '#98A2B3'], waiting: ['Their turn', '#2E90FA'], signed: ['Done', '#12B76A'], rejected: ['Rejected', '#F04438'],
+    delegated: ['Delegated', '#7A5AF8'], expired: ['Expired', '#F79009'], cancelled: ['Cancelled', '#667085'] };
+  var pill = function (st) { var s = STATE[st] || { label: st, c: '#667085' }; return '<span class="cro-pill" style="background:' + s.c + '1F;color:' + s.c + '">' + esc(s.label) + '</span>'; };
+  var rpill = function (st) { var s = RSTATUS[st] || [st, '#667085']; return '<span class="cro-pill" style="background:' + s[1] + '1F;color:' + s[1] + '">' + esc(s[0]) + '</span>'; };
+  var renderRequests = function () {
+    var F = { filter: q('filter') || 'all', scope: q('scope') === 'all' ? 'all' : 'mine', state: q('state'), search: q('q'), page: +(q('page') || 1) };
+    var isAdmin = false, timer = null;
+    var url = function () {
+      var p = []; if (F.filter !== 'all') p.push('filter=' + F.filter); if (F.scope === 'all') p.push('scope=all');
+      if (F.state) p.push('state=' + F.state); if (F.search) p.push('q=' + encodeURIComponent(F.search)); if (F.page > 1) p.push('page=' + F.page);
+      history.replaceState(null, '', link('requests', p.join('&')));
+    };
+    main().innerHTML =
+      '<div class="cro-h1"><h1>Requests</h1><div class="ctl"><span id="croScope"></span><a class="cro-btn" href="' + link('send') + '">Send for signature</a></div></div>' +
+      '<div class="cro-chips" id="croChips"></div>' +
+      '<div class="cro-card"><div class="cro-tools"><input class="cro-in" id="croQ" placeholder="Search title, reference, recipient name or email, request number" value="' + esc(F.search) + '">' +
+      '<select class="cro-in" id="croState" style="max-width:200px"><option value="">Any status</option>' + Object.keys(STATE).map(function (k) { return '<option value="' + k + '"' + (F.state === k ? ' selected' : '') + '>' + STATE[k].label + '</option>'; }).join('') + '</select></div>' +
+      '<div id="croList"><div class="cro-skel">Loading…</div></div></div>';
+    var chips = function () {
+      document.getElementById('croChips').innerHTML = FILTERS.map(function (f) { return '<button data-f="' + f[0] + '" class="' + (F.filter === f[0] ? 'on' : '') + '">' + f[1] + '</button>'; }).join('');
+      main().querySelectorAll('[data-f]').forEach(function (b) { b.onclick = function () { F.filter = b.getAttribute('data-f'); F.page = 1; chips(); load(); }; });
+      document.getElementById('croScope').innerHTML = isAdmin ? '<div class="cro-seg"><button data-s="mine" class="' + (F.scope === 'mine' ? 'on' : '') + '">Mine</button><button data-s="all" class="' + (F.scope === 'all' ? 'on' : '') + '">All</button></div>' : '';
+      main().querySelectorAll('[data-s]').forEach(function (b) { b.onclick = function () { F.scope = b.getAttribute('data-s'); F.page = 1; chips(); load(); }; });
+    };
+    var load = function () {
+      url();
+      var box = document.getElementById('croList'); box.style.opacity = .5;
+      cro('request_search', { scope: F.scope, filter: F.filter, state: F.state, search: F.search, page: F.page, pageSize: 25 }).then(function (r) {
+        isAdmin = !!r.isAdmin; if (r.scope !== F.scope) F.scope = r.scope; chips();
+        var rows = set0(r.rows), total = rows.length ? rows[0].total_count : 0, pages = Math.max(1, Math.ceil(total / 25));
+        box.style.opacity = 1;
+        if (!rows.length) { box.innerHTML = '<div class="cro-empty">No requests match.</div>'; return; }
+        box.innerHTML = '<table class="cro-table cro-list"><tr><th>Request</th><th>Status</th><th>Progress</th><th>Sent by</th><th>Sent</th><th>Deadline</th><th></th></tr>' +
+          rows.map(function (x) {
+            var dl = asDate(x.valid_until_utc), soon = x.state === 'inprogress' && dl && dl.getTime() - Date.now() < 3 * 864e5;
+            var mine = x.state === 'inprogress' && x.my_status === 'waiting';
+            return '<tr><td><a class="cro-title" href="' + link('request', 'id=' + x.request_id) + '">' + esc(x.title) + '</a><div class="cro-sub">#' + esc(x.request_id) + (x.business_ref ? ' · ' + esc(x.business_ref) : '') + (x.layout_key ? ' · ' + esc(x.layout_key) : '') + '</div></td>' +
+              '<td>' + pill(x.state) + (mine ? ' <span class="cro-pill" style="background:#FEF0C7;color:#B54708">Your turn</span>' : '') + '</td>' +
+              '<td><div class="cro-bar" style="width:90px"><i style="width:' + (x.recipients ? Math.round(100 * x.signed / x.recipients) : 0) + '%;background:var(--cro-ok)"></i></div><div class="cro-sub">' + esc(x.signed) + ' of ' + esc(x.recipients) + (x.waiting_for ? ' · waiting for ' + esc(x.waiting_for) : '') + '</div></td>' +
+              '<td>' + esc(who(x.created_by_name)) + (x.is_mine ? ' <span class="cro-sub">(you)</span>' : '') + '</td>' +
+              '<td title="' + esc(when(x.sent_utc || x.created_utc)) + '">' + esc(ago(x.sent_utc || x.created_utc)) + '</td>' +
+              '<td class="' + (soon ? 'cro-warnc' : '') + '">' + (dl ? esc(dl.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })) : '–') + '</td>' +
+              '<td style="text-align:right;white-space:nowrap">' + (mine ? '<button class="cro-btn cro-sm" data-sign="' + x.request_id + '">Sign</button> ' : '') + '<a class="cro-btn2 cro-sm" href="' + link('request', 'id=' + x.request_id) + '">Open</a></td></tr>';
+          }).join('') + '</table>' +
+          '<div class="cro-pager"><span>' + total + ' request' + (total === 1 ? '' : 's') + '</span>' + (pages > 1 ? '<span><button class="cro-btn2 cro-sm" data-p="-1"' + (F.page <= 1 ? ' disabled' : '') + '>‹ Previous</button> Page ' + F.page + ' of ' + pages + ' <button class="cro-btn2 cro-sm" data-p="1"' + (F.page >= pages ? ' disabled' : '') + '>Next ›</button></span>' : '') + '</div>';
+        box.querySelectorAll('[data-p]').forEach(function (b) { b.onclick = function () { F.page += +b.getAttribute('data-p'); load(); }; });
+        box.querySelectorAll('[data-sign]').forEach(function (b) { b.onclick = function () { openSigning(+b.getAttribute('data-sign'), b); }; });
+      }).catch(function (e) { box.style.opacity = 1; box.innerHTML = '<div class="cro-err">' + esc(e.message) + '</div>'; });
+    };
+    chips();
+    document.getElementById('croQ').oninput = function (e) { clearTimeout(timer); timer = setTimeout(function () { F.search = e.target.value.trim(); F.page = 1; load(); }, 400); };
+    document.getElementById('croState').onchange = function (e) { F.state = e.target.value; F.page = 1; load(); };
+    load();
+  };
+
+  /* ---------- one request ---------- */
+  var download = function (requestId, kind, btn) {
+    if (btn) btn.disabled = true;
+    return cro('output_get', { requestId: requestId, kind: kind }).then(function (o) {
+      var bin = atob(o.b64), u8 = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([u8], { type: o.contentType || 'application/pdf' }));
+      a.download = o.fileName || (kind + '.pdf'); document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    }).catch(function (e) { toast(e.message, true); }).then(function () { if (btn) btn.disabled = false; });
+  };
+  var renderRequest = function () {
+    var id = q('id');
+    if (!/^\d+$/.test(id)) { main().innerHTML = '<div class="cro-err">No request selected.</div><a class="cro-btn2" href="' + link('requests') + '">All requests</a>'; return; }
+    var load = function () {
+      return cro('request_detail', { requestId: +id }).then(function (d) {
+        var R = (d.request[0] || [])[0], RC = d.request[1] || [], OUT = set0(d.outputs), TL = set0(d.timeline), A = d.access || {};
+        if (!R) throw new Error('Request not found.');
+        var manage = A.creator || A.admin, open = R.state === 'inprogress';
+        var mine = open && A.myStatus === 'waiting';
+        var kv = function (k, v) { return v ? '<span>' + k + '</span><b>' + v + '</b>' : ''; };
+        var PURP = PURPOSES;
+        main().innerHTML =
+          '<div class="cro-crumb"><a href="' + link('requests') + '">‹ Requests</a></div>' +
+          '<div class="cro-h1"><h1>' + esc(R.title) + ' ' + pill(R.state) + '</h1><div class="ctl">' +
+            (mine ? '<button class="cro-btn" id="croSign">Sign now</button>' : '') +
+            (manage && open ? '<button class="cro-btn2" id="croRefresh">Refresh status</button>' : '') +
+            (manage && R.state === 'completed' && !R.outputs_retrieved_utc ? '<button class="cro-btn2" id="croOutputs">Fetch signed copy</button>' : '') +
+            (manage && (open || R.state === 'draft' || R.state === 'failed') ? '<button class="cro-btn2 cro-danger" id="croCancel">Cancel request</button>' : '') +
+          '</div></div>' +
+          '<div id="croConfirm"></div>' +
+          (R.state_reason && R.state !== 'inprogress' && R.state !== 'completed' ? '<div class="cro-err">' + esc(R.state_reason) + '</div>' : '') +
+          '<div class="cro-grid cro-g21">' +
+            '<div class="cro-card"><h2>Recipients <small>' + (R.sequential ? 'in order' : 'all at once') + '</small></h2>' +
+              '<table class="cro-table"><tr><th>#</th><th>Recipient</th><th>Action</th><th>Security</th><th>Field</th><th>Status</th></tr>' +
+              RC.map(function (x) {
+                var me = A.email && x.email.toLowerCase() === A.email.toLowerCase();
+                return '<tr><td>' + esc(x.sign_order) + '</td><td><b>' + esc(x.full_name || x.email) + '</b>' + (me ? ' <span class="cro-sub">(you)</span>' : '') +
+                  '<div class="cro-sub">' + esc(x.email) + ' · ' + (x.kind === 'internal' ? 'internal' : 'external') + '</div></td>' +
+                  '<td>' + esc(PURP[x.share_purpose] || x.share_purpose) + '</td>' +
+                  '<td>' + esc(x.kind === 'internal' ? ({ circularo_login: 'Circularo account', as_external: 'Email code', saml: 'SSO' }[x.internal_mode] || '–') : ({ email_otp: 'Email code', none: 'Link only', password: 'Password', sms_otp: 'SMS code', oauth: 'OAuth' }[x.protection] || x.protection)) + '</td>' +
+                  '<td>' + esc(x.anchor_id ? x.anchor_id.replace(/_/g, ' ') : (R.placement_used || '').indexOf('default') >= 0 || R.placement === 'adhoc' ? 'default position' : '–') + '</td>' +
+                  '<td>' + rpill(x.status) + (x.acted_utc && x.status === 'signed' ? '<div class="cro-sub" title="' + esc(when(x.acted_utc)) + '">' + esc(ago(x.acted_utc)) + '</div>' : '') + '</td></tr>';
+              }).join('') + '</table></div>' +
+            '<div class="cro-card"><h2>Details</h2><div class="cro-kv">' +
+              kv('Request', '#' + esc(R.request_id)) + kv('Reference', esc(R.business_ref || '')) +
+              kv('Sent by', esc(who(R.created_by_name))) + kv('Created', esc(when(R.created_utc))) + kv('Sent', R.sent_utc ? esc(when(R.sent_utc)) : '') +
+              kv('Deadline', R.valid_until_utc ? esc(when(R.valid_until_utc)) : '') + kv('Completed', R.completed_utc ? esc(when(R.completed_utc)) : '') +
+              kv('Layout', esc(R.layout_key || 'none (ad hoc)')) + kv('Fields placed by', esc(R.placement_used || R.placement)) +
+              kv('Last update', R.last_event_utc || R.last_checked_utc ? esc(ago(R.last_event_utc > R.last_checked_utc ? R.last_event_utc : (R.last_checked_utc || R.last_event_utc))) : '') +
+              kv('Circularo id', R.circularo_document_id ? '<span class="cro-mono">' + esc(R.circularo_document_id.slice(0, 8)) + '…</span>' : '') +
+            '</div></div>' +
+          '</div>' +
+          '<div class="cro-grid cro-g12" style="margin-top:16px">' +
+            '<div class="cro-card"><h2>Documents</h2>' + (!manage ? '<div class="cro-empty">The sender can download the signed copy.</div>' : OUT.length ? OUT.map(function (o) {
+                return '<div class="cro-file"><div><b>' + esc({ signed: 'Signed document', audit: 'Audit trail', certificate: 'Certificate of fulfillment' }[o.kind] || o.kind) + '</b><div class="cro-sub">' + esc(Math.max(1, Math.round(o.size_bytes / 1024))) + ' KB' + (o.has_signature ? ' · digitally signed' : '') + '</div></div><button class="cro-btn2 cro-sm" data-dl="' + esc(o.kind) + '">Download</button></div>';
+              }).join('') : '<div class="cro-empty">' + (R.state === 'completed' ? 'Not stored yet – the sync fetches them within a few minutes.' : 'Available when everyone has signed.') + '</div>') + '</div>' +
+            '<div class="cro-card"><h2>History</h2><ul class="cro-act">' + (TL.length ? TL.map(function (t) {
+                var c = t.outcome === 'ok' ? (t.source === 'circularo' ? '#12B76A' : '#4E3FD8') : '#F04438';
+                return '<li><span class="cro-dot" style="background:' + c + '"></span><span class="t" title="' + esc(when(t.at_utc)) + '">' + esc(ago(t.at_utc)) + '</span><span><b>' + esc(t.what) + '</b>' + (t.who ? ' · ' + esc(who(t.who)) : '') +
+                  (t.outcome !== 'ok' ? ' <span class="cro-pill cro-badc">' + esc(t.outcome) + '</span>' : '') + (t.detail && t.outcome !== 'ok' ? '<div class="cro-sub">' + esc(String(t.detail).slice(0, 200)) + '</div>' : '') + '</span></li>';
+              }).join('') : '<li class="cro-empty">Nothing yet.</li>') + '</ul></div>' +
+          '</div>';
+        var on = function (idv, fn) { var b = document.getElementById(idv); if (b) b.onclick = function () { fn(b); }; };
+        on('croSign', function (b) { openSigning(+id, b); });
+        on('croRefresh', function (b) { b.disabled = true; cro('request_refresh', { requestId: +id }).then(function () { toast('Status updated from Circularo.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
+        on('croOutputs', function (b) { b.disabled = true; cro('request_outputs', { requestId: +id }).then(function () { toast('Signed copy stored.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
+        on('croCancel', function () {
+          var c = document.getElementById('croConfirm');
+          c.innerHTML = '<div class="cro-card cro-confirm"><b>Cancel this request?</b> Circularo stops the signing for everyone and recipients can no longer sign. This cannot be undone.' +
+            '<div class="cro-f" style="margin-top:10px"><label>Reason (optional)</label><input class="cro-in" id="croWhy" maxlength="400"></div>' +
+            '<div class="cro-actions" style="margin-top:8px"><button class="cro-btn2" id="croNo">Keep it</button><button class="cro-btn cro-dangerbtn" id="croYes">Cancel request</button></div></div>';
+          document.getElementById('croNo').onclick = function () { c.innerHTML = ''; };
+          document.getElementById('croYes').onclick = function (e) {
+            e.target.disabled = true;
+            cro('request_cancel', { requestId: +id, reason: document.getElementById('croWhy').value.trim() }).then(function () { toast('Request cancelled.'); return load(); })
+              .catch(function (er) { e.target.disabled = false; toast(er.message, true); });
+          };
+        });
+        main().querySelectorAll('[data-dl]').forEach(function (b) { b.onclick = function () { download(+id, b.getAttribute('data-dl'), b); }; });
+      });
+    };
+    main().innerHTML = '<div class="cro-skel">Loading…</div>';
+    load().catch(fail);
+  };
+
   /* ---------- pages still to come ---------- */
   var renderSoon = function (title) {
     main().innerHTML = '<div class="cro-h1"><h1>' + esc(title) + '</h1></div><div class="cro-card cro-empty">This page is being built. Use the Dashboard for now.</div>';
@@ -571,8 +725,8 @@
   ({
     dashboard: renderDashboard,
     send: renderSend,
-    requests: function () { renderSoon('Requests'); },
-    request: function () { renderSoon('Request'); },
+    requests: renderRequests,
+    request: renderRequest,
     users: function () { renderSoon('Users'); }
   }[page] || renderDashboard)();
 })();

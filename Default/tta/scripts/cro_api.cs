@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.7.0";
+        private const string VERSION = "cro-api 0.8.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1274,6 +1274,42 @@ namespace Cro
                         Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "PUT", "/share/disable", body, ref dbg);
                         DbQuery(conn, "cro_api.request_set_state", "@RequestId", rid, "@State", "cancelled", "@Reason", reason, "@Source", "user", "@Actor", who[1] + " (" + who[0] + ")");
                         result = "{\"requestId\":" + rid + ",\"state\":\"cancelled\",\"circularo\":true,\"shares\":" + ids.Count + "}";
+                        break;
+                    }
+                    case "request_search":
+                    {
+                        // ARGS: { scope, filter, state, search, page, pageSize }  (needs 008_requests.sql)
+                        string scope = Arg(a, "scope", 10).ToLowerInvariant() == "all" && IsAdmin(cfg, who[0]) ? "all" : "mine";
+                        int page, size;
+                        if (!int.TryParse(Arg(a, "page", 6), out page)) page = 1;
+                        if (!int.TryParse(Arg(a, "pageSize", 4), out size)) size = 25;
+                        string em = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
+                        result = "{\"scope\":" + JQ(scope) + ",\"isAdmin\":" + (IsAdmin(cfg, who[0]) ? "true" : "false") + ",\"rows\":"
+                               + DbQuery(conn, "cro_api.request_search", "@Scope", scope, "@ResourceId", who[0], "@Email", Nz(em),
+                                         "@Filter", Nz(Arg(a, "filter", 20)), "@State", Nz(Arg(a, "state", 20)), "@Search", Nz(Arg(a, "search", 100)),
+                                         "@Page", page, "@PageSize", size, "@DeadlineDays", 3) + "}";
+                        break;
+                    }
+                    case "request_detail":
+                    {
+                        // ARGS: { requestId }  Creator, recipient or admin. -> request, recipients, outputs, timeline, access
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        string em = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
+                        var acc = FirstRow(DbQuery(conn, "cro_api.request_access", "@RequestId", rid, "@ResourceId", who[0], "@Email", Nz(em)));
+                        if (acc == null) throw new Exception("Request not found.");
+                        bool admin = IsAdmin(cfg, who[0]);
+                        bool creator = JS(acc, "is_creator") == "1" || JS(acc, "is_creator").ToLowerInvariant() == "true";
+                        bool recipient = JS(acc, "is_recipient") == "1" || JS(acc, "is_recipient").ToLowerInvariant() == "true";
+                        if (!creator && !recipient && !admin)
+                        {
+                            DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "request_detail", "@Outcome", "refused", "@RequestId", rid, "@Detail", "Not creator, recipient or admin");
+                            throw new Exception("You do not have access to this request.");
+                        }
+                        result = "{\"request\":" + DbQuery(conn, "cro_api.request_get", "@RequestId", rid)
+                               + ",\"outputs\":" + (creator || admin ? DbQuery(conn, "cro_api.output_list", "@RequestId", rid) : "[[]]")
+                               + ",\"timeline\":" + DbQuery(conn, "cro_api.request_timeline", "@RequestId", rid, "@Max", 100)
+                               + ",\"access\":{\"creator\":" + (creator ? "true" : "false") + ",\"recipient\":" + (recipient ? "true" : "false")
+                               + ",\"admin\":" + (admin ? "true" : "false") + ",\"myStatus\":" + JQ(JS(acc, "my_status")) + ",\"email\":" + JQ(em) + "}}";
                         break;
                     }
                     case "user_list":
