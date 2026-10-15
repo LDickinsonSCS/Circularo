@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.5.0";
+        private const string VERSION = "cro-api 0.6.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -809,7 +809,44 @@ namespace Cro
             }
             var res = new Dictionary<string, object>();
             res["events"] = (double)events.Count; res["requests"] = (double)log.Count; res["ok"] = (double)ok; res["failed"] = (double)failed; res["log"] = log;
-            return JSer(res);
+            string summary = JSer(res);
+            try { DbQuery(conn, "cro_api.sync_heartbeat", "@Events", events.Count, "@Requests", log.Count, "@Failed", failed, "@Summary", summary.Length > 3900 ? summary.Substring(0, 3900) : summary); }
+            catch (Exception ex) { dbg += "Heartbeat not recorded: " + Inner(ex) + " "; }
+            return summary;
+        }
+        // The caller's email, decided server-side: CRO user record first, then the TotalAgility resource.
+        private static string CallerEmail(string conn, string systemSession, string resourceId, ref string dbg)
+        {
+            try
+            {
+                foreach (var u in FirstSet(DbQuery(conn, "cro_api.user_list")))
+                    if (string.Equals(JS(u, "tta_resource_id"), resourceId, StringComparison.OrdinalIgnoreCase) && JS(u, "email") != "") return JS(u, "email").ToLowerInvariant();
+            }
+            catch (Exception) { }
+            try
+            {
+                var asm = typeof(TotalAgility.Sdk.UserService).Assembly;
+                var rt = asm.GetType("TotalAgility.Sdk.ResourceService", false);
+                if (rt != null)
+                {
+                    var svc = Activator.CreateInstance(rt);
+                    foreach (var mi in rt.GetMethods())
+                    {
+                        var ps = mi.GetParameters();
+                        if (mi.Name != "GetResource" || ps.Length != 2 || ps[0].ParameterType != typeof(string)) continue;
+                        object idArg = ps[1].ParameterType == typeof(string) ? (object)resourceId : Activator.CreateInstance(ps[1].ParameterType);
+                        if (!(idArg is string)) { var pid = idArg.GetType().GetProperty("Id"); if (pid != null) pid.SetValue(idArg, resourceId, null); }
+                        var r = mi.Invoke(svc, new object[] { systemSession, idArg });
+                        foreach (var n in new[] { "Email", "EmailAddress", "Mail" })
+                        {
+                            var v = Convert.ToString(GetP(r, n) ?? GetP(GetP(r, "Resource"), n));
+                            if (!string.IsNullOrEmpty(v)) return v.Trim().ToLowerInvariant();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) { dbg += "Email lookup: " + Inner(ex) + " "; }
+            return "";
         }
         // Refresh one request; when completed, fetch the outputs if not yet stored.
         private static string SyncOne(object cfg, string conn, string key, long rid, string source, ref string dbg)
@@ -1127,6 +1164,30 @@ namespace Cro
                         Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "DELETE", "/webhooks/" + Uri.EscapeDataString(id), null, ref dbg);
                         DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "webhook_delete", "@Outcome", "ok", "@Detail", id);
                         result = "{\"deleted\":" + JQ(id) + "}";
+                        break;
+                    }
+                    case "dashboard":
+                    {
+                        // ARGS: { scope: "mine"|"all", days: 30 }
+                        string scope = Arg(a, "scope", 10).ToLowerInvariant() == "all" && IsAdmin(cfg, who[0]) ? "all" : "mine";
+                        int days; if (!int.TryParse(Arg(a, "days", 4), out days)) days = 30;
+                        string email = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
+                        object em = email == "" ? null : (object)email;
+                        result = "{\"scope\":" + JQ(scope) + ",\"isAdmin\":" + (IsAdmin(cfg, who[0]) ? "true" : "false") + ",\"email\":" + JQ(email)
+                               + ",\"overview\":" + DbQuery(conn, "cro_api.dashboard_overview", "@Scope", scope, "@ResourceId", who[0], "@Email", em, "@DeadlineDays", 3)
+                               + ",\"reports\":" + DbQuery(conn, "cro_api.dashboard_reports", "@Scope", scope, "@ResourceId", who[0], "@Email", em, "@Days", days)
+                               + ",\"activity\":" + DbQuery(conn, "cro_api.dashboard_activity", "@Scope", scope, "@ResourceId", who[0], "@Email", em, "@Max", 20) + "}";
+                        break;
+                    }
+                    case "monitor":
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        result = DbQuery(conn, "cro_api.monitor_status");
+                        break;
+                    case "webhook_recent":
+                    {
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        int max; if (!int.TryParse(Arg(a, "max", 4), out max)) max = 50;
+                        result = DbQuery(conn, "cro_api.webhook_recent", "@Max", max);
                         break;
                     }
                     case "user_list":

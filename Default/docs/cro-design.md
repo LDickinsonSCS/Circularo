@@ -140,6 +140,23 @@ The integration always tries the configured layout first; if anchors find nothin
 7. Users provisioning and internal signers.
 8. Package export into the repo; test checklist.
 
+## Dashboard (CRO Dashboard form)
+
+Modelled on Circularo's Home and Reports pages, built from the CRO SQL record, so it covers only what went through TTA, with more detail than Circularo shows.
+
+| Area | Content | Source |
+|---|---|---|
+| Quick start | Three tiles like Circularo's: **Sign now** (only me), **We sign** (me + others), **They sign** (others only), each opening CRO Send with that preset | – |
+| Overview | Assigned to me · Waiting for others · Completed · Approaching deadline (≤ 3 days) · Needs attention (rejected / expired / cancelled / failed) – each clickable to the filtered list | `dashboard_overview` |
+| Status | Donut of requests by state | `dashboard_overview` (2nd set) |
+| Volume over time | Sent vs completed per day (7 / 30 / 90 days) | `dashboard_reports` |
+| Success & turnaround | Completion rate, rejected/expired/cancelled counts, average / fastest / slowest time to complete | `dashboard_reports` |
+| Placement mix | Anchors vs default position vs other ad hoc options – useful while testing the options | `dashboard_reports` |
+| Recent activity | "CRO test 03 … signed by Leigh Dickinson – 3 minutes ago" from the audit log and webhook events | `dashboard_activity` |
+| Integration health (admins) | Last sync run, events waiting, webhooks in the last 24 h, bad signatures, failed requests, completed without outputs | `monitor_status`, `webhook_recent` |
+
+Scope toggle: **Mine** (requests I created or am a recipient of) / **All** (CRO admins). Charts are drawn as inline SVG in CRO_UI_JS (no external libraries), matching the forms' look. Optionally later: Circularo's own org-wide figures via `POST /search/dashboards` (trans_status, trans_per_date, …) for documents created outside TTA.
+
 ## Sandbox findings (2026-10-15)
 
 - Service account support@sudocodesolutions.com is an organization admin (`manage_users`, `add_users`, `use_webhooks`, `view_api_keys`, `view_logs`, `seal_document`).

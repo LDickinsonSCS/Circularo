@@ -77,6 +77,7 @@ Started: 2026-10-15.
 | 003a_option_columns.sql | Adds placement/adhoc_option/placement_used, share_to/internal_mode, oauth protection to tables made by the first 003 | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003a_option_columns.sql` | run 2026-10-15 (Leigh) |
 | 004_procedures.sql | 16 `cro_api` procedures (health, audit, request create/get/list/set_document/set_shares/set_state/outputs_done/due_check, webhook receive/next/done, user list/upsert/set_circularo); raises compat level to 130 if needed. Parsed clean with sqlfluff (tsql). | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 004_procedures.sql` | run 2026-10-15 (Leigh), re-run 21:27 with the acted_utc fix |
 | 006_outputs.sql | `cro.output_file` (signed / audit / certificate PDFs, sha256, has_signature) + `output_save/list/get` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 006_outputs.sql` | run 2026-10-15 (Leigh) |
+| 007_dashboard.sql | `cro.sync_heartbeat`, `cro.visible_requests()`, `sync_heartbeat`, `monitor_status`, `webhook_recent`, `dashboard_overview/reports/activity` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 007_dashboard.sql` | written, not yet run |
 | 005_secrets.sql | `cro.secret` (DPAPI ciphertext, fingerprint) + `secret_set/get/status` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 005_secrets.sql` | written, not yet run | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | run 2026-10-15 (Leigh) |
 
 ## Live TTA items (category Circularo)
@@ -84,15 +85,16 @@ Started: 2026-10-15.
 |---|---|---|---|---|
 | `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | config v3 (admins, receiver URL) | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `9cdf37a0d2a3252adefc5dd5146e9bd56fae815c45e3c96a1b77489549317b7a` |
 | `CRO_API_KEY` (secure server variable) | `CRO_API_KEY` | – | entry point only: Leigh enters a key, `key_migrate` encrypts it into `cro.secret`, then the variable is blanked | – |
-| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 9 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.5.0) | `3d643995e21b714fef3ddf0956290bd5af5945c6fd65b796863026ffa730cfbb` (file); live = file without final newline `41749d44f49c…` |
-| `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | 3 (released) | same script as CRO API; process variable `CRO_RUNMODE=sync` (not an input) | live `41749d44f49c…` |
+| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 10 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.6.0) | `4acf0fbece7c213ba97c77a40e9b8491e44302ad52262066b8b09daf9aa2eb79` (file; live = without final newline) |
+| `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | 4 (released) | same script as CRO API; process variable `CRO_RUNMODE=sync` (not an input) | live `41749d44f49c…` |
 | Job schedule `CRO Sync - every 2 minutes` | ScheduleId `A67CA440EF924666B53D4ADEC15FCABD` | active | – | – |
 | Circularo webhook | `4PSeQKEB_eIBv4MnskB-` (organization) | – | callback `https://portal.sudocodesolutions.com/cro-webhook/receive.ashx`; HMAC secret DPAPI in `cro.secret` (fingerprint `2c8bb95309136469`) | – |
 | Webhook receiver (IIS) | app `cro-webhook` on portal | deployed 2026-10-15 (Leigh) | `Default/webhook/receive.ashx`, `web.config`, `README.md` | – |
 
-`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, request_outputs, output_list, output_get, sync_now*, webhook_list*, webhook_setup*, webhook_delete*, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
+`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, request_outputs, output_list, output_get, dashboard, monitor*, webhook_recent*, sync_now*, webhook_list*, webhook_setup*, webhook_delete*, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
 
 ## Decisions & gotchas log
+- 2026-10-15: **Dashboard requested (Leigh)** "along the lines of Circularo's": quick-start tiles (Sign now / We sign / They sign), overview counters, status donut, volume over time, success/turnaround, placement mix, recent activity, and an admin integration-health panel. Scope Mine/All. Design section added.
 - 2026-10-15: **TTA strips the final newline of a script on save** – compare hashes of the trimmed text (live CRO API = file minus trailing `\n`).
 - 2026-10-15: `CreateProcessBasedOnExisting` copies the **released** version of the base; set the node script explicitly on the copy.
 - 2026-10-15: CRO Sync = same script as CRO API in an async process with process variable `CRO_RUNMODE=sync`, which is **not** in `Data.InputVariables`, so no caller can switch CRO API into sync mode.
