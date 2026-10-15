@@ -83,11 +83,14 @@ Started: 2026-10-15.
 |---|---|---|---|---|
 | `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | config v2 (adds `admins`) | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `605e18026849248f0e0eec8f26679c5d99190be650cc8f1de2574cd64c413452` |
 | `CRO_API_KEY` (secure server variable) | `CRO_API_KEY` | – | entry point only: Leigh enters a key, `key_migrate` encrypts it into `cro.secret`, then the variable is blanked | – |
-| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 5 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.2.0) | `f9863c4abf6ed4a1b21ab9ae99a60b8ef2012e1315ead2c29cf32c4c5e6db8c7` |
+| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 7 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.3.1) | `d624ffb3872d5ea0520f05e2671e490f1288eb1d9329c92c9e9df8c2ea3ee08a` |
 
-`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
+`CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
 
 ## Decisions & gotchas log
+- 2026-10-15: **Circularo resolves an email that belongs to an internal user to that user** (ldickinson@… → `ldickinson@sudocodesolutions.com.1`, type internal), even when shared as external with OTP. Status must be matched by **shareId** (present in `workflow.waitingFor[]`), never by username – fixed in cro-api 0.3.1 after the first refresh wrongly showed "signed".
+- 2026-10-15: To fix in next SQL update: `request_set_state` should clear `recipient.acted_utc` when a status goes back to waiting/pending (request 1 recipient carries a stale acted_utc from the bug above).
+- 2026-10-15: `POST /documents` returned the id under `id`; folder path `TTA/CRO` auto-created. `signatureAnchors` sent as a JSON string multipart field works. Date annotations are off by default (`defaults.annotations` absent) until the annotation field format is verified.
 - 2026-10-15: **Key handling decided (Leigh): DPAPI.** The Circularo key is encrypted on the TTA server with DPAPI LocalMachine scope + CRO entropy and stored in `cro.secret`; `CRO_API_KEY` is only the entry point and is blanked after `key_migrate`. Machine scope because sync jobs (web app pool) and async jobs (Core Worker) may run as different identities. Rotation: enter new key in CRO_API_KEY → run key_migrate (admin) → check fingerprint → blank the variable.
 - 2026-10-15: 004 first run failed – tables came from the first 003 (no option columns) and 003 never alters existing tables. Fixed with 003a. Rule: any later column change gets its own lettered script.
 - 2026-10-15: **Security finding – secure server variables are readable through the client SDK.** A Designer browser session calling `ClientService.GetServerVariableValue('CRO_API_KEY')` got the full 64-char value; only the variable *list* blanks it. Not yet tested with a non-admin forms user. Mitigation proposed: encrypt the key server-side (DPAPI as scs-admin) so the stored value is useless off the server. Applies equally to DP project secrets.
@@ -108,6 +111,8 @@ Started: 2026-10-15.
 - GitHub repo moved to `LDickinsonSCS/Circularo` (capital C); remote updated.
 
 ## Verified
+- 2026-10-15 21:14: **First end-to-end send.** Request 1 = sample 01 NDA, anchors, external recipient ldickinson@sudocodesolutions.com (email OTP). Upload → anchor `SIG_RECIPIENT` matched on page 2 → field at x 0.47532, y 0.23599, 0.22×0.045 (as predicted by the sample preview) → document `b6042b53-9a42-402f-856d-5830cef2f065` in folder TTA/CRO → share `hfSOQKEB_eIBv4Mnx0Ac`. Refresh: inprogress, waiting.
+- 2026-10-15 21:20: **Ad hoc send.** Request 2 = sample 06 memo, placement adhoc/default_position → 1 field on last page → document `15126ba2-62a2-4678-bc1b-c95df0928235`, share `mvSQQKEB_eIBv4MnQECE`.
 - 2026-10-15 21:07: `health` → DB Circularo, login SCSDEMO\scs-admin, SQL Server 2022 Express (16.0.1000.6), compat 160, 6 cro tables, 19 cro_api procs.
 - 2026-10-15 21:07: `key_migrate` → stored, fingerprint `dd7ce17399420cba`, length 64, machine SCSDEMO. `circularo_check` authenticates from the encrypted store (no fallback). `CRO_API_KEY` then blanked via SDK; client read returns length 0; `circularo_check` still OK.
 - **Note:** SCSDEMO\scs-admin is **sysadmin** (maps to dbo), so the `cro_app` restriction is not in force on the demo server. Production needs a low-privilege service account.

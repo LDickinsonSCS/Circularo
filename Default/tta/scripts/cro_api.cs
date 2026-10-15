@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.2.0";
+        private const string VERSION = "cro-api 0.3.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -265,6 +265,82 @@ namespace Cro
                 return new[] { ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture), rd.ReadToEnd() };
         }
 
+        // ---- HTTP with raw bytes (multipart upload, binary download) ----
+        private static object[] HttpBytes(string method, string url, byte[] body, string contentType, int timeoutSec)
+        {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.Method = method;
+            req.Timeout = timeoutSec * 1000;
+            req.ReadWriteTimeout = timeoutSec * 1000;
+            req.UserAgent = VERSION;
+            if (body != null)
+            {
+                req.ContentType = contentType;
+                req.ContentLength = body.Length;
+                using (var s = req.GetRequestStream()) s.Write(body, 0, body.Length);
+            }
+            HttpWebResponse resp;
+            try { resp = (HttpWebResponse)req.GetResponse(); }
+            catch (WebException we)
+            {
+                resp = we.Response as HttpWebResponse;
+                if (resp == null) return new object[] { 0, Encoding.UTF8.GetBytes(we.Message), "" };
+            }
+            using (resp)
+            using (var ms = new MemoryStream())
+            {
+                resp.GetResponseStream().CopyTo(ms);
+                return new object[] { (int)resp.StatusCode, ms.ToArray(), resp.ContentType ?? "" };
+            }
+        }
+        private static byte[] Multipart(string boundary, Dictionary<string, string> fields, string fileField, string fileName, string fileType, byte[] file)
+        {
+            using (var ms = new MemoryStream())
+            {
+                Action<string> w = t => { var b = Encoding.UTF8.GetBytes(t); ms.Write(b, 0, b.Length); };
+                foreach (var kv in fields)
+                {
+                    w("--" + boundary + "\r\n");
+                    w("Content-Disposition: form-data; name=\"" + kv.Key + "\"\r\n\r\n");
+                    w(kv.Value + "\r\n");
+                }
+                w("--" + boundary + "\r\n");
+                w("Content-Disposition: form-data; name=\"" + fileField + "\"; filename=\"" + fileName.Replace("\"", "") + "\"\r\n");
+                w("Content-Type: " + fileType + "\r\n\r\n");
+                ms.Write(file, 0, file.Length);
+                w("\r\n--" + boundary + "--\r\n");
+                return ms.ToArray();
+            }
+        }
+        // Calls the Circularo API with the key. Returns parsed JSON; throws with Circularo's message on error.
+        private static object Cx(object cfg, string key, string method, string path, object body, ref string dbg)
+        {
+            string url = JS(JO(cfg, "circularo"), "apiBase").TrimEnd('/') + path + (path.Contains("?") ? "&" : "?") + "token=" + Uri.EscapeDataString(key);
+            int to = (int)(JN(JO(cfg, "circularo"), "timeoutSeconds") > 0 ? JN(JO(cfg, "circularo"), "timeoutSeconds") : 100);
+            var r = Http(method, url, body == null ? null : JSer(body), "application/json; charset=utf-8", to);
+            string text = r[1].Replace(key, "***");
+            if (r[0] != "200" && r[0] != "201")
+            {
+                object e = JParse(text);
+                string msg = JS(e, "message"); string typ = JS(e, "type");
+                throw new Exception("Circularo " + method + " " + path.Split('?')[0] + " -> " + r[0] + (typ != "" ? " " + typ : "") + ": " + (msg != "" ? msg : (text.Length > 300 ? text.Substring(0, 300) : text)));
+            }
+            return JParse(text);
+        }
+        private static double JN(object o, string k) { var d = o as Dictionary<string, object>; return (d != null && d.ContainsKey(k) && d[k] != null) ? Convert.ToDouble(d[k], CultureInfo.InvariantCulture) : 0; }
+        private static double Clamp(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
+        private static Dictionary<string, object> Pos(double x, double y, double w, double h)
+        {
+            w = Clamp(w, 0.01, 1); h = Clamp(h, 0.005, 1);
+            var p = new Dictionary<string, object>();
+            p["percentX"] = Math.Round(Clamp(x, 0, 1 - w), 5);
+            p["percentY"] = Math.Round(Clamp(y, 0, 1 - h), 5);
+            p["percentWidth"] = Math.Round(w, 5);
+            p["percentHeight"] = Math.Round(h, 5);
+            return p;
+        }
+
         // ---- secrets: DPAPI (machine scope + CRO entropy) ciphertext in SQL; plain values never stored or returned ----
         private const string ENTROPY = "CRO.Circularo.secret.v1";
         private static byte[] Dpapi(bool protect, byte[] data)
@@ -329,6 +405,294 @@ namespace Cro
             if (l == null) return false;
             foreach (var x in l) if (string.Equals(Convert.ToString(x), resourceId, StringComparison.OrdinalIgnoreCase)) return true;
             return false;
+        }
+
+        // ---- send a draft request: upload (+anchors) -> document -> share ----
+        private static string SendRequest(object cfg, string conn, string key, string actor, long requestId, string fileName, byte[] file, ref string dbg)
+        {
+            var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId)) as List<object>;
+            var reqRows = got != null && got.Count > 0 ? got[0] as List<object> : null;
+            if (reqRows == null || reqRows.Count == 0) throw new Exception("Request not found.");
+            var req = reqRows[0] as Dictionary<string, object>;
+            var rcps = got.Count > 1 ? got[1] as List<object> : new List<object>();
+            if (JS(req, "state") != "draft" && JS(req, "state") != "failed") throw new Exception("Request is " + JS(req, "state") + ", not draft.");
+            var cx = JO(cfg, "circularo");
+            string docType = JS(req, "document_type") == "" ? JS(cx, "documentType") : JS(req, "document_type");
+            string placement = JS(req, "placement");
+            var layout = JO(JO(cfg, "layouts"), JS(req, "layout_key"));
+            var anchors = layout == null ? new List<object>() : (JL(layout, "anchors") ?? new List<object>());
+            if (placement != "anchors") anchors = new List<object>();
+            if (file == null || file.Length == 0) throw new Exception("No file.");
+            double maxMb = JN(cx, "maxUploadMB") > 0 ? JN(cx, "maxUploadMB") : 40;
+            if (file.Length > maxMb * 1024 * 1024) throw new Exception("File is larger than " + maxMb + " MB.");
+
+            // 1. upload with anchors
+            var fields = new Dictionary<string, string>();
+            fields["fileName"] = fileName;
+            if (anchors.Count > 0)
+            {
+                var sa = new List<object>();
+                foreach (var ao in anchors)
+                {
+                    var a = ao as Dictionary<string, object>;
+                    var x = new Dictionary<string, object>();
+                    x["id"] = JS(a, "id");
+                    if (JS(a, "regexp") != "") x["regexp"] = JS(a, "regexp"); else x["text"] = JS(a, "text");
+                    x["offset"] = a["offset"];
+                    sa.Add(x);
+                }
+                fields["signatureAnchors"] = JSer(sa);
+            }
+            string boundary = "----cro" + Guid.NewGuid().ToString("N");
+            string ext = Path.GetExtension(fileName).ToLowerInvariant();
+            string ctype = ext == ".pdf" ? "application/pdf" : ext == ".docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/octet-stream";
+            string upUrl = JS(cx, "apiBase").TrimEnd('/') + "/files/saveFile?token=" + Uri.EscapeDataString(key);
+            var up = HttpBytes("POST", upUrl, Multipart(boundary, fields, "file", fileName, ctype, file), "multipart/form-data; boundary=" + boundary, 180);
+            string upText = Encoding.UTF8.GetString((byte[])up[1]).Replace(key, "***");
+            if ((int)up[0] != 200) throw new Exception("Circularo upload -> " + up[0] + ": " + (upText.Length > 300 ? upText.Substring(0, 300) : upText));
+            var upJ = JParse(upText);
+            var fileObj = JO(upJ, "file");
+            string hash = JS(fileObj, "hash"); if (hash == "") hash = JS(fileObj, "id");
+            int pages = (int)JN(fileObj, "pages"); if (pages < 1) pages = 1;
+            if (hash == "") throw new Exception("Upload returned no file hash.");
+
+            // anchor matches by id (de-duplicated)
+            var found = new Dictionary<string, List<Dictionary<string, object>>>();
+            var ap = JL(upJ, "anchorPositions");
+            if (ap != null)
+                foreach (var o in ap)
+                {
+                    string id = JS(o, "id");
+                    var list = new List<Dictionary<string, object>>(); var seen = new HashSet<string>();
+                    var fl = JL(o, "fields");
+                    if (fl != null) foreach (var f in fl)
+                    {
+                        var pos = JO(f, "position");
+                        string sig = JS(f, "page") + "|" + JS(pos, "percentX") + "|" + JS(pos, "percentY");
+                        if (seen.Add(sig)) list.Add(f as Dictionary<string, object>);
+                    }
+                    found[id] = list;
+                }
+
+            // 2. recipients -> shareTo
+            var byRole = new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.OrdinalIgnoreCase);
+            var shareTo = new Dictionary<long, string>();
+            foreach (var ro in rcps)
+            {
+                var r = ro as Dictionary<string, object>;
+                long rid = Convert.ToInt64(JN(r, "recipient_id"));
+                string to = JS(r, "email");
+                if (JS(r, "kind") == "internal" && JS(r, "internal_mode") != "as_external")
+                {
+                    var all = JParse(DbQuery(conn, "cro_api.user_list")) as List<object>;
+                    if (all != null && all.Count > 0)
+                        foreach (var uo in (all[0] as List<object>))
+                            if (string.Equals(JS(uo, "email"), to, StringComparison.OrdinalIgnoreCase) && JS(uo, "circularo_username") != "") to = JS(uo, "circularo_username");
+                }
+                shareTo[rid] = to;
+                string role = JS(r, "anchor_id");
+                if (role == "") role = "#" + rid;
+                if (!byRole.ContainsKey(role)) byRole[role] = new List<Dictionary<string, object>>();
+                byRole[role].Add(r);
+            }
+
+            // 3. signature fields from anchors
+            var sigFields = new List<object>();
+            var covered = new HashSet<long>();
+            var notes = new List<string>();
+            bool annotations = JS(JO(cfg, "defaults"), "annotations").ToLowerInvariant() == "true";
+            foreach (var ao in anchors)
+            {
+                var a = ao as Dictionary<string, object>;
+                string id = JS(a, "id"), type = JS(a, "type");
+                if (type == "annotation" && !annotations) { notes.Add(id + ": annotation skipped"); continue; }
+                List<Dictionary<string, object>> matches;
+                if (!found.TryGetValue(id, out matches) || matches.Count == 0) { notes.Add(id + ": no match"); continue; }
+                var orderRoles = JL(a, "roleByMatchOrder");
+                bool all = JS(a, "allMatches").ToLowerInvariant() == "true";
+                for (int mi = 0; mi < matches.Count; mi++)
+                {
+                    if (!all && orderRoles == null && mi > 0) { notes.Add(id + ": " + (matches.Count - 1) + " extra match(es) ignored"); break; }
+                    string roleSpec = orderRoles != null ? (mi < orderRoles.Count ? Convert.ToString(orderRoles[mi]) : "") : JS(a, "role");
+                    var users = new List<object>(); var rids = new List<long>();
+                    foreach (var role in roleSpec.Split(','))
+                    {
+                        List<Dictionary<string, object>> rl;
+                        if (byRole.TryGetValue(role.Trim(), out rl)) foreach (var r in rl) { long rid = Convert.ToInt64(JN(r, "recipient_id")); users.Add(shareTo[rid]); rids.Add(rid); }
+                    }
+                    if (users.Count == 0) { notes.Add(id + ": no recipient for role " + roleSpec); continue; }
+                    var m = matches[mi]; var mp = JO(m, "position"); var off = JO(a, "offset");
+                    var f = new Dictionary<string, object>();
+                    f["user"] = users;
+                    f["type"] = type == "" ? "signature" : type;
+                    if (type == "annotation") f["subtype"] = JS(a, "subtype");
+                    f["pages"] = new List<object> { JN(m, "page") };
+                    f["position"] = Pos(JN(mp, "percentX"), JN(mp, "percentY"), JN(off, "percentWidth"), JN(off, "percentHeight"));
+                    f["required"] = true;
+                    f["timestamp"] = false;
+                    sigFields.Add(f);
+                    if (type == "signature" || type == "stamp" || type == "initials") foreach (var rid in rids) covered.Add(rid);
+                }
+            }
+
+            // 4. ad hoc / fallback: default position on the last page for every signer without a field
+            var dp = JO(JO(cfg, "adhoc"), "defaultPosition");
+            int idx = 0;
+            string placementUsed = anchors.Count > 0 ? "anchors" : "adhoc";
+            foreach (var ro in rcps)
+            {
+                var r = ro as Dictionary<string, object>;
+                long rid = Convert.ToInt64(JN(r, "recipient_id"));
+                string purpose = JS(r, "share_purpose");
+                if (covered.Contains(rid) || purpose == "view" || purpose == "review") continue;
+                int cols = (int)(JN(dp, "columns") > 0 ? JN(dp, "columns") : 2);
+                double w = JN(dp, "width") > 0 ? JN(dp, "width") : 0.25, h = JN(dp, "height") > 0 ? JN(dp, "height") : 0.05;
+                double x = (JN(dp, "x") > 0 ? JN(dp, "x") : 0.08) + (idx % cols) * (w + JN(dp, "columnGap"));
+                double y = (JN(dp, "y") > 0 ? JN(dp, "y") : 0.7) + (idx / cols) * (h + JN(dp, "rowGap") + 0.02);
+                var f = new Dictionary<string, object>();
+                f["user"] = new List<object> { shareTo[rid] };
+                f["type"] = "signature";
+                f["pages"] = new List<object> { (double)pages };
+                f["position"] = Pos(x, y, w, h);
+                f["required"] = true;
+                f["timestamp"] = true;
+                f["tooltip"] = "Signature";
+                sigFields.Add(f);
+                idx++;
+                placementUsed = anchors.Count > 0 ? "anchors+default" : "default_position";
+            }
+
+            // 5. document
+            var body = new Dictionary<string, object>();
+            body["documentType"] = docType;
+            body["documentTitle"] = JS(req, "title");
+            var pdf = new Dictionary<string, object>(); pdf["content"] = hash; body["pdfFile"] = pdf;
+            var docReq = new Dictionary<string, object>();
+            docReq["body"] = body;
+            docReq["definitionType"] = JS(cx, "definitionType") == "" ? "ext" : JS(cx, "definitionType");
+            docReq["workflow"] = JS(cx, "workflow") == "" ? "wf_archive" : JS(cx, "workflow");
+            if (JS(cx, "folderPath") != "") { var od = new Dictionary<string, object>(); od["path"] = JS(cx, "folderPath"); docReq["optionalData"] = od; }
+            var docRes = Cx(cfg, key, "POST", "/documents", docReq, ref dbg);
+            string docId = JS(docRes, "id");
+            if (docId == "") { var rr = JL(docRes, "results"); if (rr != null && rr.Count > 0) docId = JS(rr[0], "documentId"); }
+            if (docId == "") throw new Exception("Circularo did not return a document id.");
+            DbQuery(conn, "cro_api.request_set_document", "@RequestId", requestId, "@DocumentId", docId, "@FileHash", hash,
+                    "@PlacementUsed", placementUsed.Length > 20 ? placementUsed.Substring(0, 20) : placementUsed,
+                    "@Detail", string.Join("; ", notes.ToArray()));
+
+            // 6. share
+            try
+            {
+                var defs = JO(cfg, "defaults");
+                var orders = new HashSet<string>();
+                foreach (var ro in rcps) orders.Add(JS(ro, "sign_order"));
+                bool sequential = orders.Count > 1;
+                string validUntil = JS(req, "valid_until_utc");
+                if (validUntil == "") validUntil = DateTime.UtcNow.AddDays(JN(defs, "deadlineDays") > 0 ? JN(defs, "deadlineDays") : 14).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+                var rem = JO(defs, "reminders");
+                var data = new List<object>();
+                foreach (var ro in rcps)
+                {
+                    var r = ro as Dictionary<string, object>;
+                    long rid = Convert.ToInt64(JN(r, "recipient_id"));
+                    var d = new Dictionary<string, object>();
+                    d["sharePurpose"] = JS(r, "share_purpose");
+                    d["shareTo"] = shareTo[rid];
+                    d["validUntil"] = validUntil;
+                    if (sequential) d["order"] = JN(r, "sign_order");
+                    string prot = JS(r, "protection");
+                    bool isExt = JS(r, "kind") == "external" || JS(r, "internal_mode") == "as_external";
+                    if (isExt && prot == "email_otp") { d["otpEnabled"] = true; d["mail"] = JS(r, "email"); }
+                    if (rem != null && JN(rem, "intervalDays") > 0)
+                    {
+                        var ar = new Dictionary<string, object>();
+                        ar["start"] = DateTime.UtcNow.AddDays(JN(rem, "startDays")).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+                        ar["intervalDays"] = JN(rem, "intervalDays");
+                        d["automaticReminder"] = ar;
+                    }
+                    data.Add(d);
+                }
+                var share = new Dictionary<string, object>();
+                share["objectType"] = "document";
+                share["type"] = docType;
+                share["id"] = docId;
+                share["data"] = data;
+                share["signatureFields"] = sigFields;
+                share["sequential"] = sequential;
+                var shRes = Cx(cfg, key, "POST", "/share", share, ref dbg) as List<object>;
+                var map = new List<object>();
+                foreach (var ro in rcps)
+                {
+                    long rid = Convert.ToInt64(JN(ro, "recipient_id"));
+                    string to = shareTo[rid], sid = "";
+                    if (shRes != null)
+                        foreach (var so in shRes)
+                        {
+                            var sw = JL(so, "sharedWith");
+                            bool hit = string.Equals(JS(so, "sharedUsername"), to, StringComparison.OrdinalIgnoreCase);
+                            if (!hit && sw != null) foreach (var x in sw) if (string.Equals(Convert.ToString(x), to, StringComparison.OrdinalIgnoreCase)) hit = true;
+                            if (hit) { sid = JS(so, "shareId"); break; }
+                        }
+                    var e = new Dictionary<string, object>(); e["recipientId"] = (double)rid; e["shareId"] = sid; e["shareTo"] = to;
+                    map.Add(e);
+                }
+                DbQuery(conn, "cro_api.request_set_shares", "@RequestId", requestId, "@Json", JSer(map));
+                var res = new Dictionary<string, object>();
+                res["requestId"] = (double)requestId; res["documentId"] = docId; res["fileHash"] = hash; res["pages"] = (double)pages;
+                res["placementUsed"] = placementUsed; res["fields"] = (double)sigFields.Count; res["sequential"] = sequential;
+                res["shares"] = map; res["notes"] = new List<object>(notes.ToArray());
+                return JSer(res);
+            }
+            catch (Exception e)
+            {
+                DbQuery(conn, "cro_api.request_set_state", "@RequestId", requestId, "@State", "failed", "@Reason", Inner(e).Length > 1900 ? Inner(e).Substring(0, 1900) : Inner(e), "@Source", "system", "@Actor", actor);
+                throw;
+            }
+        }
+
+        // ---- read Circularo status and store it ----
+        private static string RefreshRequest(object cfg, string conn, string key, long requestId, string source, ref string dbg)
+        {
+            var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId)) as List<object>;
+            var req = FirstRow(JSer(got));
+            if (req == null) throw new Exception("Request not found.");
+            string docId = JS(req, "circularo_document_id");
+            if (docId == "") throw new Exception("Request has no Circularo document yet.");
+            var dj = Cx(cfg, key, "GET", "/documents/" + Uri.EscapeDataString(docId), null, ref dbg);
+            var rl = JL(dj, "results");
+            var doc = rl != null && rl.Count > 0 ? rl[0] as Dictionary<string, object> : dj as Dictionary<string, object>;
+            var wf = JO(doc, "workflow");
+            string st = JS(wf, "shareStateName").ToLowerInvariant();
+            string state = st == "completed" ? "completed" : st == "rejected" ? "rejected" : st == "expired" ? "expired" : st == "cancelled" || st == "canceled" ? "cancelled" : "inprogress";
+            // waitingFor carries the shareId: match recipients by share id (Circularo may resolve an email to an internal username).
+            var waiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var turn = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var wl = JL(wf, "waitingFor");
+            if (wl != null) foreach (var w in wl)
+            {
+                string sid = JS(w, "shareId"); string n = JS(JO(w, "user"), "name"); if (n == "") n = JS(w, "user");
+                if (sid != "") waiting.Add(sid); if (n != "") waiting.Add("u:" + n);
+                if (sid != "" && JS(w, "hasTurn").ToLowerInvariant() == "true") turn.Add(sid);
+            }
+            var rcps = got.Count > 1 ? got[1] as List<object> : new List<object>();
+            var upd = new List<object>();
+            foreach (var ro in rcps)
+            {
+                string sid = JS(ro, "share_id");
+                bool isWaiting = sid != "" ? waiting.Contains(sid) : waiting.Contains("u:" + JS(ro, "share_to"));
+                string status = state == "completed" ? "signed" : state == "rejected" ? (isWaiting ? "rejected" : JS(ro, "status"))
+                              : state == "expired" ? (isWaiting ? "expired" : "signed") : state == "cancelled" ? "cancelled"
+                              : (isWaiting ? (sid != "" && !turn.Contains(sid) ? "pending" : "waiting") : "signed");
+                var e = new Dictionary<string, object>(); e["recipientId"] = JN(ro, "recipient_id"); e["status"] = status; upd.Add(e);
+            }
+            string signedHash = state == "completed" ? JS(JO(JO(doc, "values"), "pdfFile"), "content") : "";
+            if (signedHash == "" && state == "completed") signedHash = JS(JO(doc, "pdfFile"), "content");
+            DbQuery(conn, "cro_api.request_set_state", "@RequestId", requestId, "@State", state, "@Reason", Nz(st == "" ? "" : "Circularo: " + st),
+                    "@SignedFileHash", Nz(signedHash), "@RecipientsJson", JSer(upd), "@Source", source, "@Actor", "system");
+            var res = new Dictionary<string, object>();
+            res["requestId"] = (double)requestId; res["documentId"] = docId; res["circularoState"] = st; res["state"] = state;
+            res["isSigned"] = JS(doc, "isSigned"); res["waitingFor"] = new List<object>(new List<string>(waiting).ToArray()); res["hasTurn"] = new List<object>(new List<string>(turn).ToArray()); res["recipients"] = upd;
+            return JSer(res);
         }
 
         // ---- secure server variable probe (never returns the value) ----
@@ -486,6 +850,28 @@ namespace Cro
                         if (!int.TryParse(Arg(a, "pageSize", 4), out size)) size = 50;
                         result = DbQuery(conn, "cro_api.request_list", "@State", Nz(Arg(a, "state", 20).ToLowerInvariant()),
                                          "@Search", Nz(Arg(a, "search", 100)), "@Page", page, "@PageSize", size);
+                        break;
+                    }
+                    case "request_send":
+                    {
+                        // ARGS: { requestId, fileName, fileB64 }  (test path; CRO Signing will pass TTA documents)
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        var rq = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
+                        if (rq == null) throw new Exception("Request not found.");
+                        if (!string.Equals(JS(rq, "created_by_resource_id"), who[0], StringComparison.OrdinalIgnoreCase) && !IsAdmin(cfg, who[0]))
+                        {
+                            DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "request_send", "@Outcome", "refused", "@RequestId", rid, "@Detail", "Not the creator");
+                            throw new Exception("Only the person who created the request can send it.");
+                        }
+                        string fn = Arg(a, "fileName", 200); if (fn == "") fn = "document.pdf";
+                        byte[] bytes = Convert.FromBase64String(JS(a, "fileB64"));
+                        result = SendRequest(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), who[1] + " (" + who[0] + ")", rid, fn, bytes, ref dbg);
+                        break;
+                    }
+                    case "request_refresh":
+                    {
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        result = RefreshRequest(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), rid, "poll", ref dbg);
                         break;
                     }
                     case "user_list":
