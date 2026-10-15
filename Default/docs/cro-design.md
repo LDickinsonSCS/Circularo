@@ -2,15 +2,17 @@
 
 Status: draft for review, 2026-10-15. Builds on `circularo-capabilities.md`.
 
-## Decisions
+**Principle: this is a first integration, so every option stays available for testing.** Defaults are set in `CRO_CONFIG`; each request (and each recipient) can override them. Nothing below is removed by choosing a default.
 
-| Topic | Decision |
-|---|---|
-| Signers | Internal (Circularo users managed from TTA) and external (email-only, no account) |
-| External protection | Email code (OTP) by default; SMS/password available per recipient later |
-| Field placement | Anchor text, with layouts per document type in `CRO_CONFIG` |
-| Signing experience | Circularo emails **and** signing from inside TTA forms |
-| Completion | Webhooks as the trigger, status polling as the safety net |
+## Decisions (defaults)
+
+| Topic | Default | Also available for testing |
+|---|---|---|
+| Signers | Internal (Circularo users managed from TTA) and external (email-only, no account) | – |
+| External protection | Email code (OTP) | None, password, OAuth login; SMS and KYC once licensed |
+| Field placement | Anchor text, layouts per document type in `CRO_CONFIG` | Fixed coordinates, Circularo templates, dynamic Word templates, field auto-detection, and the ad hoc options below |
+| Signing experience | Circularo emails **and** signing launched from TTA (new tab/pop-up) | Internal signing mode per request: Circularo login / as external with email code / SAML |
+| Completion | Webhooks as the trigger, status polling as the safety net | Polling only (webhook off) for comparison |
 | Users | TTA is the master; TTA creates, updates and suspends Circularo users |
 | Record keeping | SQL database `Circularo` (schemas `cro`, `cro_api`) |
 | Service identity | TTA runs as `scs-admin`; SQL access via role `cro_app` (EXECUTE on `cro_api` only) |
@@ -78,7 +80,7 @@ The webhook is registered once with `POST /webhooks {type:"tenant", callbackUrl,
 **Send (TTA user or another TTA process)**
 1. `CRO Send` form → `CRO API REQUEST_CREATE` validates (sender in `CRO Senders`, recipients, document) and writes `signing_request` + `recipient` rows (state `draft`).
 2. `REQUEST_SEND` starts a `CRO Signing` job with the request id; other TTA processes can start it directly.
-3. `CRO Signing`: `saveFile` with the layout's anchors → map anchor matches to recipients (de-duplicate, clamp 0–1) → `POST /documents` (custom field `tta_request` = request ref) → `POST /share` (sequential by default, `mail` OTP for externals, deadline and reminders from config) → store share ids, state `inprogress`.
+3. `CRO Signing`: `saveFile` with the layout's anchors → map anchor matches to recipients (de-duplicate, clamp 0–1) → `POST /documents` (the TTA link is kept in SQL; the sandbox account lacks the custom-fields right) → `POST /share` (sequential by default, `mail` OTP for externals, deadline and reminders from config) → store share ids, state `inprogress`.
 4. Job waits, checking SQL state on a timer.
 
 **Status**
@@ -87,8 +89,26 @@ The webhook is registered once with `POST /webhooks {type:"tenant", callbackUrl,
 - On `completed`: re-read document, download signed PDF by the new hash, audit trail and Certificate of Fulfillment (`?cof=true`), store against the job; `rejected`/`expired`/`cancelled` recorded with reason.
 
 **Sign from inside TTA**
-- External: `SIGN_URL` validates the TTA user's right to see that request, calls `GET /share/{shareId}/validate`, returns `<frontend>/share?shareToken=…`; the `CRO Sign` form shows it in a frame (or new tab if Circularo refuses framing). The signer still enters the email code.
-- Internal: `<frontend>/#!/sign?documentId=…&documentType=…`. **The user must be signed in to Circularo** – see open question 1.
+- Circularo pages send `X-Frame-Options: SAMEORIGIN` (checked on the sandbox), so they **cannot be shown inside a TTA form frame**. The `CRO Sign` form opens the signing page in a new tab or pop-up and watches for completion (status refresh via `CRO API`). Ask Circularo whether they can allow framing for portal.sudocodesolutions.com; if they do, the frame becomes an option.
+- External: `SIGN_URL` validates the TTA user's right to see that request, calls `GET /share/{shareId}/validate`, returns `<frontend>/share?shareToken=…`. The signer still enters the email code.
+- Internal, three modes (configurable per request, all to be tested):
+  1. **Circularo login** – `<frontend>/#!/sign?documentId=…&documentType=…`; the user signs in to Circularo once and stays signed in.
+  2. **As external with email code** – the staff member is shared as an external recipient (their email), so the share-token link works; no Circularo licence used, but the signature is not tied to their Circularo account.
+  3. **SAML** – the sandbox has a SAML configuration entry; if usable, single sign-on from the organisation's identity provider.
+
+**Ad hoc documents (production will mostly be these)**
+
+An arbitrary uploaded document has no known layout. Placement options, all to be built so they can be compared:
+
+| Option | How | Notes |
+|---|---|---|
+| A. Default position | Fields stacked on the last page (bottom, one row per signer), with initials optional on every page | Zero effort for the sender; may overlap content |
+| B. Circularo's own editor | `<frontend>/signPrepare?mode=create&documentId=…&documentType=…&callbackUrl=<TTA form>` in a new tab; the sender places fields and sends in Circularo, then returns to TTA | Full Circularo field set; TTA reads the resulting shares back |
+| C. TTA placement page | `CRO Place` form renders the PDF (PDF.js) and the sender clicks to place each signer's fields; TTA sends with exact coordinates | Stays in TTA; most build effort |
+| D. Field detection | Circularo detects AcroForm/XFA/Word fields on upload (`signFields`, `formFields`; org setting "Detect signature fields", currently off) | Only for documents that already have form fields |
+| E. Typed tokens | The author types an agreed token (e.g. `{{sign:1}}`) in the document; treated as anchors | Good for documents produced by other systems |
+
+The integration always tries the configured layout first; if anchors find nothing (sample 07, scanned), it falls back to the request's ad hoc option and records that it did.
 
 **Users**
 - `CRO Users` form (CRO Admins) lists TTA resources in `CRO Signers` and their Circularo status; Save/Suspend call `CRO Users` → `POST /users`, `PUT /users/{id}`; results in `circularo_user` and the audit log.
@@ -120,8 +140,19 @@ The webhook is registered once with `POST /webhooks {type:"tenant", callbackUrl,
 7. Users provisioning and internal signers.
 8. Package export into the repo; test checklist.
 
+## Sandbox findings (2026-10-15)
+
+- Service account support@sudocodesolutions.com is an organization admin (`manage_users`, `add_users`, `use_webhooks`, `view_api_keys`, `view_logs`, `seal_document`).
+- Protection rights present: email OTP, password, OAuth. **No SMS OTP, KYC, TSA timestamp or custom-fields rights.**
+- Document definitions: only `d_default` (ext); workflow `wf_archive` (states initialized, created).
+- Org settings: external sharing on; parallel by default, order changeable; same user in several steps **off**; signature inputs draw/type/upload/wacom/mobile; provider internal only; default share rights print + reject without comment; field detection off; upload limit 40 MB; date format dd/MM/yyyy.
+- Internal usernames are not always the email (e.g. `ldickinson@sudocodesolutions.com.1`), so store the Circularo username separately from the email.
+- Framing: `X-Frame-Options: SAMEORIGIN` on all pages.
+- API keys: one generic key exists ("TTA-SCSDEMO-GENERIC", created today). Webhooks: none registered yet.
+- Users: 3 (support, ldickinson, svlakum). Org role groups: admin, user, prepare, read, sign.
+
 ## Open questions
 
-1. **Internal signers inside TTA need a Circularo sign-in.** Options: (a) SAML single sign-on add-on so the TTA user's identity carries over; (b) users sign in to Circularo once in their browser and stay signed in (session ~30 days); (c) treat staff as "external" recipients with an email code when signing from TTA (no Circularo licence needed, but the signature is not tied to a Circularo account). Recommend (b) to start, (a) if licensed.
-2. Where to host the webhook receiver: IIS on the TTA server (proposed) – confirm it is reachable from the internet over HTTPS.
-3. Which TTA documents/templates are signed first (drives the anchor layouts).
+1. Which internal signing mode becomes the default after testing (all three are built).
+2. Ask Circularo: allow framing for portal.sudocodesolutions.com; webhook retry policy; whether SAML can be used on the sandbox.
+3. Webhook receiver on IIS at portal.sudocodesolutions.com (reachable from the web – confirmed). Registering the webhook needs your go-ahead when the receiver is ready.

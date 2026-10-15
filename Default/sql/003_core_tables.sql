@@ -49,6 +49,9 @@ CREATE TABLE cro.signing_request (
     title                  NVARCHAR(255)  NOT NULL,
     document_type          VARCHAR(64)    NOT NULL CONSTRAINT df_sr_doctype DEFAULT ('d_default'),
     layout_key             VARCHAR(64)    NULL,               -- anchor layout in CRO_CONFIG
+    placement              VARCHAR(20)    NOT NULL CONSTRAINT df_sr_placement DEFAULT ('anchors'),
+    adhoc_option           VARCHAR(20)    NULL,               -- fallback when anchors find nothing
+    placement_used         VARCHAR(20)    NULL,               -- what actually happened
     circularo_document_id  VARCHAR(64)    NULL,
     original_file_hash     VARCHAR(128)   NULL,
     signed_file_hash       VARCHAR(128)   NULL,
@@ -65,7 +68,9 @@ CREATE TABLE cro.signing_request (
     last_checked_utc       DATETIME2(3)   NULL,               -- last status poll
     outputs_retrieved_utc  DATETIME2(3)   NULL,               -- signed PDF + audit fetched
     row_ver                ROWVERSION,
-    CONSTRAINT ck_sr_state CHECK (state IN ('draft','sending','inprogress','completed','rejected','expired','cancelled','failed'))
+    CONSTRAINT ck_sr_state CHECK (state IN ('draft','sending','inprogress','completed','rejected','expired','cancelled','failed')),
+    CONSTRAINT ck_sr_placement CHECK (placement IN ('anchors','coordinates','template','word_template','detect','adhoc')),
+    CONSTRAINT ck_sr_adhoc CHECK (adhoc_option IS NULL OR adhoc_option IN ('default_position','circularo_editor','tta_placer','detect','tokens'))
 );
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'ux_sr_ref')
@@ -88,8 +93,10 @@ CREATE TABLE cro.recipient (
     user_id          INT            NULL CONSTRAINT fk_rcp_user REFERENCES cro.circularo_user(user_id),
     email            NVARCHAR(254)  NOT NULL,
     full_name        NVARCHAR(200)  NULL,
+    share_to         NVARCHAR(254)  NULL,                     -- what was sent to Circularo (username or email)
+    internal_mode    VARCHAR(20)    NULL,                     -- circularo_login|as_external|saml (internal only)
     share_purpose    VARCHAR(10)    NOT NULL CONSTRAINT df_rcp_purpose DEFAULT ('sign'),
-    protection       VARCHAR(10)    NOT NULL CONSTRAINT df_rcp_prot DEFAULT ('email_otp'),  -- none|email_otp|sms_otp|password
+    protection       VARCHAR(10)    NOT NULL CONSTRAINT df_rcp_prot DEFAULT ('email_otp'),  -- none|email_otp|sms_otp|password|oauth
     anchor_id        VARCHAR(64)    NULL,
     share_id         VARCHAR(128)   NULL,
     status           VARCHAR(12)    NOT NULL CONSTRAINT df_rcp_status DEFAULT ('pending'),
@@ -98,7 +105,8 @@ CREATE TABLE cro.recipient (
     row_ver          ROWVERSION,
     CONSTRAINT ck_rcp_kind    CHECK (kind IN ('internal','external')),
     CONSTRAINT ck_rcp_purpose CHECK (share_purpose IN ('sign','approve','accept','review','view')),
-    CONSTRAINT ck_rcp_prot    CHECK (protection IN ('none','email_otp','sms_otp','password')),
+    CONSTRAINT ck_rcp_prot    CHECK (protection IN ('none','email_otp','sms_otp','password','oauth')),
+    CONSTRAINT ck_rcp_mode    CHECK (internal_mode IS NULL OR internal_mode IN ('circularo_login','as_external','saml')),
     CONSTRAINT ck_rcp_status  CHECK (status IN ('pending','waiting','signed','rejected','delegated','expired','cancelled'))
 );
 GO

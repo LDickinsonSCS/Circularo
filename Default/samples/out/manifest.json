@@ -1,0 +1,670 @@
+{
+  "generated": "2026-10-15",
+  "note": "Synthetic test documents for the CRO Circularo integration",
+  "documents": [
+    {
+      "file": "01_mutual_nda.pdf",
+      "title": "Mutual NDA",
+      "purpose": "Basic label anchors, two signers in parallel, signing date fields",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "discloser",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 1
+        },
+        {
+          "role": "recipient",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 1,
+          "protection": "email_otp"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIG_DISCLOSER",
+          "text": "Disclosing Party Signature:",
+          "role": "discloser",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "DATE_DISCLOSER",
+          "text": "Disclosing Party Date:",
+          "role": "discloser",
+          "type": "annotation",
+          "subtype": "annotation_date",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        },
+        {
+          "id": "SIG_RECIPIENT",
+          "text": "Receiving Party Signature:",
+          "role": "recipient",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "DATE_RECIPIENT",
+          "text": "Receiving Party Date:",
+          "role": "recipient",
+          "type": "annotation",
+          "subtype": "annotation_date",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        }
+      ],
+      "notes": "Parallel (sequential=false). Expect one match per anchor on page 2."
+    },
+    {
+      "file": "02_offer_letter.pdf",
+      "title": "Offer letter",
+      "purpose": "Sequential internal → external; initials on every page (one anchor, many matches)",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "hr_manager",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 1
+        },
+        {
+          "role": "candidate",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 2,
+          "protection": "email_otp"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIG_HR",
+          "text": "HR Manager Signature:",
+          "role": "hr_manager",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "SIG_CANDIDATE",
+          "text": "Candidate Signature:",
+          "role": "candidate",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "DATE_CANDIDATE",
+          "text": "Candidate Date:",
+          "role": "candidate",
+          "type": "annotation",
+          "subtype": "annotation_date",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        },
+        {
+          "id": "INITIALS_CANDIDATE",
+          "text": "Initials:",
+          "role": "candidate",
+          "type": "initials",
+          "offset": {
+            "percentX": 0.09,
+            "percentY": -0.01,
+            "percentWidth": 0.08,
+            "percentHeight": 0.03
+          },
+          "allMatches": true
+        }
+      ],
+      "notes": "3 pages; 'Initials:' appears once per page → candidate initials on every page."
+    },
+    {
+      "file": "03_supplier_agreement.pdf",
+      "title": "Supplier services agreement",
+      "purpose": "Hidden white-text tokens, signing group with quorum 1, approve and review purposes, stamp field, 6 pages",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "supplier_director_a",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 1,
+          "group": "supplier",
+          "quorum": 1,
+          "protection": "email_otp"
+        },
+        {
+          "role": "supplier_director_b",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 1,
+          "group": "supplier",
+          "quorum": 1,
+          "protection": "email_otp"
+        },
+        {
+          "role": "customer_approver",
+          "kind": "internal",
+          "purpose": "approve",
+          "order": 2
+        },
+        {
+          "role": "customer_stamp",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 3
+        },
+        {
+          "role": "legal_review",
+          "kind": "internal",
+          "purpose": "review",
+          "order": 4
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIG_SUPPLIER",
+          "text": "{{SUPPLIER_SIG}}",
+          "role": "supplier_director_a,supplier_director_b",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.0,
+            "percentY": 0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "SIG_CUSTOMER",
+          "text": "{{CUSTOMER_APPROVE}}",
+          "role": "customer_approver",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.0,
+            "percentY": 0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "STAMP_CUSTOMER",
+          "text": "{{CUSTOMER_STAMP}}",
+          "role": "customer_stamp",
+          "type": "stamp",
+          "offset": {
+            "percentX": 0.0,
+            "percentY": 0.0,
+            "percentWidth": 0.15,
+            "percentHeight": 0.08
+          }
+        }
+      ],
+      "notes": "Tokens are 6pt white text: invisible to readers, detectable as text. Tests groups/quorum and approve/review."
+    },
+    {
+      "file": "04_purchase_approval.pdf",
+      "title": "Purchase requisition approval",
+      "purpose": "Regex anchors in a table; review → approve → sign, all internal",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "line_manager",
+          "kind": "internal",
+          "purpose": "review",
+          "order": 1
+        },
+        {
+          "role": "finance_controller",
+          "kind": "internal",
+          "purpose": "approve",
+          "order": 2
+        },
+        {
+          "role": "head_of_it",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 3
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIGN_STEP",
+          "regexp": "\\[SIGN-\\d\\]",
+          "roleByMatchOrder": [
+            "line_manager",
+            "finance_controller",
+            "head_of_it"
+          ],
+          "type": "signature",
+          "offset": {
+            "percentX": 0.0,
+            "percentY": -0.004,
+            "percentWidth": 0.2,
+            "percentHeight": 0.04
+          }
+        }
+      ],
+      "notes": "One regex returns three matches; map by order. Review purpose normally carries no signature field – tests what Circularo accepts."
+    },
+    {
+      "file": "05_consent_form.pdf",
+      "title": "Customer consent form",
+      "purpose": "Fillable annotation fields placed by anchors: name, email, phone, company, checkboxes, date",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "customer",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 1,
+          "protection": "email_otp"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "F_NAME",
+          "text": "Full name:",
+          "role": "customer",
+          "type": "annotation",
+          "subtype": "annotation_full_name",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        },
+        {
+          "id": "F_MAIL",
+          "text": "Email:",
+          "role": "customer",
+          "type": "annotation",
+          "subtype": "annotation_mail",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        },
+        {
+          "id": "F_PHONE",
+          "text": "Phone:",
+          "role": "customer",
+          "type": "annotation",
+          "subtype": "annotation_phone",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        },
+        {
+          "id": "F_COMPANY",
+          "text": "Company:",
+          "role": "customer",
+          "type": "annotation",
+          "subtype": "annotation_company",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        },
+        {
+          "id": "CHK_PROCESSING",
+          "text": "I agree to the processing",
+          "role": "customer",
+          "type": "annotation",
+          "subtype": "annotation_check",
+          "offset": {
+            "percentX": -0.03,
+            "percentY": -0.002,
+            "percentWidth": 0.02,
+            "percentHeight": 0.015
+          }
+        },
+        {
+          "id": "CHK_UPDATES",
+          "text": "I agree to receive service",
+          "role": "customer",
+          "type": "annotation",
+          "subtype": "annotation_check",
+          "offset": {
+            "percentX": -0.03,
+            "percentY": -0.002,
+            "percentWidth": 0.02,
+            "percentHeight": 0.015
+          }
+        },
+        {
+          "id": "SIG_CUSTOMER",
+          "text": "Customer Signature:",
+          "role": "customer",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "DATE_SIGNED",
+          "text": "Signed on:",
+          "role": "customer",
+          "type": "annotation",
+          "subtype": "annotation_date",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        }
+      ],
+      "notes": "Subtype names from the Dynamic Word template docs; whether /share accepts them on signatureFields is to be verified."
+    },
+    {
+      "file": "06_adhoc_memo.pdf",
+      "title": "Ad hoc memo",
+      "purpose": "No anchors at all – represents an arbitrary uploaded document",
+      "placement": "adhoc",
+      "recipients": [
+        {
+          "role": "acknowledger",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 1
+        },
+        {
+          "role": "external_ack",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 2,
+          "protection": "email_otp"
+        }
+      ],
+      "anchors": [],
+      "notes": "Tests ad hoc placement options: default position (last page, stacked per signer), Circularo signPrepare editor, or a TTA placement page."
+    },
+    {
+      "file": "07_scanned_letter.pdf",
+      "title": "Scanned letter (image only)",
+      "purpose": "No text layer – anchors must find nothing",
+      "placement": "anchors-expected-to-fail",
+      "recipients": [
+        {
+          "role": "authoriser",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 1,
+          "protection": "email_otp"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIG_AUTH",
+          "text": "Authorised Signature:",
+          "role": "authoriser",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        }
+      ],
+      "notes": "Expect anchorPositions empty → integration must fall back to ad hoc placement and report it."
+    },
+    {
+      "file": "08_large_agreement_40p.pdf",
+      "title": "Large agreement (40 pages)",
+      "purpose": "Size/page-count handling, signature on the last page only",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "customer",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 1
+        },
+        {
+          "role": "supplier",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 2,
+          "protection": "email_otp"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIG_CUSTOMER",
+          "text": "Customer Authorised Signature:",
+          "role": "customer",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "SIG_SUPPLIER",
+          "text": "Supplier Authorised Signature:",
+          "role": "supplier",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        }
+      ],
+      "notes": "40 pages; checks upload time, anchor scan time and download of the signed file."
+    },
+    {
+      "file": "09_anchor_edge_cases.pdf",
+      "title": "Anchor edge cases",
+      "purpose": "Anchor near page edge (offset pushes past 1.0 → must be clamped) and ambiguous repeated text",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "approver",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 1
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIG_EDGE",
+          "text": "Sign here:",
+          "role": "approver",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "SIG_AMBIGUOUS",
+          "text": "Approver",
+          "role": "approver",
+          "type": "initials",
+          "offset": {
+            "percentX": 0.09,
+            "percentY": -0.01,
+            "percentWidth": 0.08,
+            "percentHeight": 0.03
+          }
+        },
+        {
+          "id": "SIG_PROPER",
+          "text": "Approver Signature:",
+          "role": "approver",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.37,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        }
+      ],
+      "notes": "Expect SIG_EDGE x > 1 (clamp), SIG_AMBIGUOUS many matches (reject or take first, configurable)."
+    },
+    {
+      "file": "10_bilingual_tenancy_addendum.docx",
+      "title": "Bilingual tenancy addendum (Word)",
+      "purpose": "Word → PDF conversion by Circularo, Arabic RTL text, English part of bilingual label as anchor",
+      "placement": "anchors",
+      "recipients": [
+        {
+          "role": "landlord",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 1
+        },
+        {
+          "role": "tenant",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 2,
+          "protection": "email_otp"
+        }
+      ],
+      "anchors": [
+        {
+          "id": "SIG_LANDLORD",
+          "text": "Landlord Signature",
+          "role": "landlord",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.42,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "DATE_LANDLORD",
+          "text": "Landlord Date",
+          "role": "landlord",
+          "type": "annotation",
+          "subtype": "annotation_date",
+          "offset": {
+            "percentX": 0.42,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        },
+        {
+          "id": "SIG_TENANT",
+          "text": "Tenant Signature",
+          "role": "tenant",
+          "type": "signature",
+          "offset": {
+            "percentX": 0.42,
+            "percentY": -0.012,
+            "percentWidth": 0.22,
+            "percentHeight": 0.045
+          }
+        },
+        {
+          "id": "DATE_TENANT",
+          "text": "Tenant Date",
+          "role": "tenant",
+          "type": "annotation",
+          "subtype": "annotation_date",
+          "offset": {
+            "percentX": 0.42,
+            "percentY": -0.008,
+            "percentWidth": 0.18,
+            "percentHeight": 0.022
+          }
+        }
+      ],
+      "notes": "Checks Circularo's Office conversion (or TTA-side conversion) and that anchors survive it. Also try an Arabic anchor (توقيع المستأجر)."
+    },
+    {
+      "file": "11_dynamic_word_template.docx",
+      "title": "Dynamic MS Word eSigning template",
+      "purpose": "Circularo's own field notation inside Word rectangle shapes (roles, dropdown, checkbox, stamp, timestamp)",
+      "placement": "dynamic-word-template",
+      "recipients": [
+        {
+          "role": "customer",
+          "kind": "external",
+          "purpose": "sign",
+          "order": 1,
+          "protection": "email_otp"
+        },
+        {
+          "role": "provider",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 2
+        }
+      ],
+      "anchors": [],
+      "notes": "Upload as a template in Circularo (admin) or upload via API and inspect signFields/formFields. If Circularo does not detect these shapes, re-save the file once in Microsoft Word (shapes were generated programmatically)."
+    },
+    {
+      "file": "12_adhoc_letter.docx",
+      "title": "Ad hoc Word letter",
+      "purpose": "Arbitrary Word upload with no anchors",
+      "placement": "adhoc",
+      "recipients": [
+        {
+          "role": "signatory",
+          "kind": "internal",
+          "purpose": "sign",
+          "order": 1
+        }
+      ],
+      "anchors": [],
+      "notes": "Tests conversion plus ad hoc placement together."
+    }
+  ]
+}

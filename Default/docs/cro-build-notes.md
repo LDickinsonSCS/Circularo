@@ -34,11 +34,27 @@ Started: 2026-10-15.
 - 2026-10-15: External protection = email code (OTP) by default.
 - 2026-10-15: Completion = webhooks (enabled on sandbox) as trigger + status polling as safety net (Circularo documents no webhook retry).
 
+- 2026-10-15: **First integration – keep every option available for testing**; defaults in CRO_CONFIG, overridable per request/recipient.
+- 2026-10-15: Production will mostly be **ad hoc documents** – ad hoc placement options A–E in the design (default position, Circularo editor, TTA placement page, field detection, typed tokens), with fallback when anchors find nothing.
+- 2026-10-15: portal.sudocodesolutions.com is reachable from the web → webhook receiver on IIS there.
+- 2026-10-15: Internal signing modes all built: Circularo login / as external with email code / SAML.
+
 ## Open decisions
-1. Internal signers signing inside TTA need a Circularo sign-in: SAML SSO add-on / sign in once and stay signed in / treat as external with email code. Proposed: sign in once to start.
-2. Webhook receiver hosting: small IIS handler on the TTA server, reachable from the internet over HTTPS – confirm.
-3. First documents/templates to be signed (drives anchor layouts).
-4. Sandbox plan/add-ons and org settings (capability review §9–10).
+1. Default internal signing mode after testing.
+2. Ask Circularo: framing for portal.sudocodesolutions.com, webhook retries, SAML on sandbox.
+3. Webhook registration (needs Leigh's go-ahead once the receiver is live).
+
+## Sandbox findings (2026-10-15, read-only checks as support@)
+- Org admin rights incl. manage_users, add_users, use_webhooks, view_api_keys, view_logs, seal_document.
+- Protection rights: email OTP, password, OAuth. **No SMS OTP, KYC, TSA, custom fields.**
+- Definitions: `d_default` only; workflow `wf_archive` (initialized → created).
+- Settings: external sharing on; parallel default, changeable; same user in several steps off; provider internal; default rights print + rejectWithoutComment; detectSignFields off; upload 40 MB.
+- Usernames may differ from email (`…@sudocodesolutions.com.1`).
+- `X-Frame-Options: SAMEORIGIN` → no iframe; signing opens in new tab/pop-up.
+- One API key "TTA-SCSDEMO-GENERIC" exists (created 2026-10-15 15:58 UTC); no webhooks registered; 3 users.
+
+## Samples (Default/samples)
+12 synthetic documents (9 PDF, 3 Word) + `out/manifest.json` (recipients, anchors, offsets) and a test matrix in `samples/README.md`. Anchor hits and predicted field boxes verified by rendering; dynamic Word template fields verified as whitespace-free JSON.
 
 ## Circularo API – key facts (detail in capability review)
 - Auth: API key `POST /api/key {description}` → `{id}` (10 years, user's rights) or `POST /login`. `?token=` query parameter; no Bearer header.
@@ -57,7 +73,7 @@ Started: 2026-10-15.
 | 000_create_database.sql | Create DB `Circularo` | `sqlcmd -S .\SQLEXPRESS -E -d master -b -I -i 000_create_database.sql` | written, not yet run |
 | 001_schemas.sql | Schemas `cro`, `cro_api`, role `cro_app` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 001_schemas.sql` | written, not yet run |
 | 002_service_login.sql | Login/user for `scs-admin` → `cro_app` (tries domain then machine name; `@override` if needed) | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 002_service_login.sql` | written, not yet run |
-| 003_core_tables.sql | `circularo_user`, `signing_request`, `recipient`, `webhook_event`, append-only `audit_log` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | written, not yet run |
+| 003_core_tables.sql | `circularo_user`, `signing_request` (incl. placement/adhoc options), `recipient` (incl. internal mode, share_to, oauth), `webhook_event`, append-only `audit_log` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | written, not yet run |
 
 ## Decisions & gotchas log
 - 2026-10-15: Prefix CRO agreed.
