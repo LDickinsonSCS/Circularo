@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.9.2";
+        private const string VERSION = "cro-api 0.10.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -978,6 +978,175 @@ namespace Cro
             return null;
         }
 
+        // ---- TotalAgility Capture documents (reflection on TotalAgility.Sdk.CaptureDocumentService) ----
+        private static object Cap(string method, params object[] args)
+        {
+            var t = typeof(TotalAgility.Sdk.UserService).Assembly.GetType("TotalAgility.Sdk.CaptureDocumentService", true);
+            var svc = Activator.CreateInstance(t);
+            foreach (var mi in t.GetMethods())
+                if (mi.Name == method && mi.GetParameters().Length == args.Length)
+                {
+                    var ps = mi.GetParameters();
+                    for (int i = 0; i < args.Length; i++)
+                        if (args[i] == null && ps[i].ParameterType.IsClass && ps[i].ParameterType != typeof(string) && !ps[i].ParameterType.IsArray)
+                            try { args[i] = Activator.CreateInstance(ps[i].ParameterType); } catch (Exception) { }
+                    try { return mi.Invoke(svc, args); }
+                    catch (TargetInvocationException e) { throw new Exception(method + ": " + Inner(e)); }
+                }
+            throw new Exception("CaptureDocumentService." + method + " with " + args.Length + " parameters not found.");
+        }
+        private static object Reporting()
+        {
+            var t = typeof(TotalAgility.Sdk.UserService).Assembly.GetType("TotalAgility.Sdk.CaptureDocumentService", true)
+                    .GetMethod("GetDocument").GetParameters()[1].ParameterType;
+            var r = Activator.CreateInstance(t);
+            var p = t.GetProperty("Station"); if (p != null) p.SetValue(r, "CRO", null);
+            return r;
+        }
+        // Source file of a TotalAgility document as PDF or DOCX: [fileName, bytes, parentFolderId]
+        private static object[] TtaDocument(string session, string docId)
+        {
+            var doc = Cap("GetDocument", session, Reporting(), docId);
+            string name = Convert.ToString(GetP(doc, "FileName") ?? GetP(doc, "Name") ?? "document");
+            string parent = Convert.ToString(GetP(doc, "ParentId") ?? "");
+            byte[] bytes = null; string mime = "";
+            try
+            {
+                var sf = Cap("GetSourceFile", session, Reporting(), docId);
+                mime = Convert.ToString(GetP(sf, "MimeType") ?? "").ToLowerInvariant();
+                bytes = GetP(sf, "SourceFile") as byte[];
+            }
+            catch (Exception) { }
+            bool pdf = mime.Contains("pdf") || IsPdf(bytes);
+            bool docx = mime.Contains("wordprocessingml") || name.ToLowerInvariant().EndsWith(".docx");
+            if (bytes == null || bytes.Length == 0 || (!pdf && !docx))
+            {
+                // images, TIFF, etc.: let TotalAgility render a PDF
+                var st = Cap("GetDocumentFile", session, Reporting(), docId, "pdf") as Stream;
+                if (st == null) throw new Exception("TotalAgility returned no PDF for document " + docId + ".");
+                using (var ms = new MemoryStream()) { st.CopyTo(ms); bytes = ms.ToArray(); }
+                pdf = true;
+            }
+            string baseName = Path.GetFileNameWithoutExtension(name); if (baseName == "") baseName = "document";
+            return new object[] { baseName + (pdf ? ".pdf" : ".docx"), bytes, parent };
+        }
+        private static string TtaAddDocument(string session, string folderId, byte[] data, string mime)
+        {
+            var t = typeof(TotalAgility.Sdk.UserService).Assembly.GetType("TotalAgility.Sdk.CaptureDocumentService", true);
+            var ps = t.GetMethod("CreateDocument3").GetParameters();
+            var input = Activator.CreateInstance(ps[5].ParameterType);
+            ps[5].ParameterType.GetProperty("Data").SetValue(input, data, null);
+            ps[5].ParameterType.GetProperty("MimeType").SetValue(input, mime, null);
+            Exception last = null;
+            foreach (int idx in new[] { -1, 0 })
+            {
+                try
+                {
+                    var id = Cap("CreateDocument3", session, Reporting(), folderId, null, "", input, idx);
+                    string s = Convert.ToString(GetP(id, "Id") ?? id);
+                    if (s != "") return s;
+                }
+                catch (Exception e) { last = e; }
+            }
+            throw new Exception("Could not add the document to folder " + folderId + ": " + (last == null ? "no id returned" : last.Message));
+        }
+        private static object[] OutputBytes(string conn, long rid, string kind, string actor)
+        {
+            var t = DbClient(); var c = Activator.CreateInstance(t, conn);
+            try
+            {
+                Call(c, "Open");
+                var cmd = Call(c, "CreateCommand");
+                var ct = Prop(cmd, "CommandType"); ct.SetValue(cmd, Enum.Parse(ct.PropertyType, "StoredProcedure"), null);
+                Prop(cmd, "CommandText").SetValue(cmd, "cro_api.output_get", null);
+                var ps = Prop(cmd, "Parameters").GetValue(cmd, null);
+                Call(ps, "AddWithValue", "@RequestId", rid); Call(ps, "AddWithValue", "@Kind", kind); Call(ps, "AddWithValue", "@Actor", actor);
+                var r = Call(cmd, "ExecuteReader");
+                if (!(bool)Call(r, "Read")) return null;
+                var o = new object[] { Convert.ToString(Call(r, "GetValue", 0)), (byte[])Call(r, "GetValue", 4) };
+                Call(r, "Close");
+                return o;
+            }
+            catch (TargetInvocationException e) { throw new Exception(Inner(e)); }
+            finally { try { ((IDisposable)c).Dispose(); } catch (Exception) { } }
+        }
+
+        // ---- CRO Signing process (run mode "signing"): first pass sends, later passes check and finish ----
+        private static void Signing(ScriptParameters sp, object cfg, string conn, ref string dbg)
+        {
+            string session = In(sp, "SPP_SYSTEM_SESSION_ID"), jobId = InSafe(sp, "AWF_JOBID");
+            string ridS = InSafe(sp, "CRO_REQUEST_ID"), state = "", done = "false", signedDoc = InSafe(sp, "CRO_SIGNED_DOCUMENT_ID"), err = "", result = "";
+            long rid = 0; long.TryParse(ridS, out rid);
+            string actor = "CRO Signing job " + jobId;
+            try
+            {
+                string key = ApiKey(conn, session, ref dbg);
+                if (rid == 0)
+                {
+                    string docId = InSafe(sp, "CRO_DOCUMENT_ID").Trim();
+                    if (docId == "") throw new Exception("CRO_DOCUMENT_ID is empty.");
+                    var req = JParse(InSafe(sp, "CRO_REQUEST") == "" ? "{}" : InSafe(sp, "CRO_REQUEST")) as Dictionary<string, object>;
+                    if (req == null) throw new Exception("CRO_REQUEST is not a JSON object.");
+                    var src = TtaDocument(session, docId);
+                    if (JS(req, "title") == "") req["title"] = SafeName(Path.GetFileNameWithoutExtension((string)src[0])).Replace("/", " ");
+                    req["ttaJobId"] = jobId;
+                    if (JS(req, "businessRef") == "") req["businessRef"] = "TTA document " + docId;
+                    string senderId = JS(req, "senderResourceId").ToUpperInvariant(), senderName = JS(req, "senderName");
+                    if (senderName == "") senderName = "CRO Signing";
+                    var created = FirstRow(DbQuery(conn, "cro_api.request_create", "@ActorId", Nz(senderId.Length == 32 ? senderId : ""), "@ActorName", senderName, "@Json", JSer(req)));
+                    rid = Convert.ToInt64(JN(created, "request_id"));
+                    result = SendRequest(cfg, conn, key, actor, rid, (string)src[0], (byte[])src[1], ref dbg);
+                    state = "inprogress";
+                }
+                else
+                {
+                    string outcome = SyncOne(cfg, conn, key, rid, "poll", ref dbg);
+                    var row = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
+                    state = JS(row, "state");
+                    result = outcome;
+                    if (state == "completed" && JS(row, "outputs_retrieved_utc") != "")
+                    {
+                        if (signedDoc == "")
+                        {
+                            string folder = InSafe(sp, "CRO_FOLDER_ID").Trim();
+                            if (folder == "") folder = (string)TtaDocument(session, InSafe(sp, "CRO_DOCUMENT_ID").Trim())[2];
+                            if (folder == "") throw new Exception("No folder to add the signed document to (set CRO_FOLDER_ID).");
+                            var sc = JO(cfg, "signing");
+                            var kinds = new List<string> { "signed" };
+                            if (JS(sc, "attachAudit").ToLowerInvariant() != "false") kinds.Add("audit");
+                            if (JS(sc, "attachCertificate").ToLowerInvariant() != "false") kinds.Add("certificate");
+                            var added = new List<object>();
+                            foreach (var k in kinds)
+                            {
+                                var ob = OutputBytes(conn, rid, k, actor);
+                                if (ob == null) continue;
+                                string id = TtaAddDocument(session, folder, (byte[])ob[1], "application/pdf");
+                                if (k == "signed") signedDoc = id;
+                                added.Add(k + "=" + id);
+                            }
+                            DbQuery(conn, "cro_api.audit_write", "@Actor", actor, "@Action", "tta_documents_added", "@Outcome", "ok", "@RequestId", rid, "@Detail", string.Join("; ", added.ToArray()));
+                            result += "; documents " + string.Join(", ", added.ToArray());
+                        }
+                        done = "true";
+                    }
+                    else if (state == "rejected" || state == "expired" || state == "cancelled" || state == "failed") done = "true";
+                }
+            }
+            catch (Exception e)
+            {
+                err = Inner(e);
+                if (rid == 0) { state = "failed"; done = "true"; }   // nothing sent: end the job with the error
+                dbg += "signing: " + err + " ";
+            }
+            sp.OutputVariables["CRO_REQUEST_ID"] = rid == 0 ? "" : rid.ToString(CultureInfo.InvariantCulture);
+            sp.OutputVariables["CRO_STATE"] = state;
+            sp.OutputVariables["CRO_DONE"] = done;
+            sp.OutputVariables["CRO_SIGNED_DOCUMENT_ID"] = signedDoc;
+            sp.OutputVariables["RESULT"] = result;
+            sp.OutputVariables["ERROR"] = err;
+            sp.OutputVariables["DEBUG"] = dbg.Length > 3900 ? dbg.Substring(0, 3900) : dbg;
+        }
+
         // ---- signing link for the caller (must be a recipient of the request) ----
         private static string SignUrl(object cfg, string conn, string key, string email, string resourceId, long requestId, ref string dbg)
         {
@@ -1037,6 +1206,7 @@ namespace Cro
                 object a = JParse(In(sp, "ARGS") == "" ? "{}" : In(sp, "ARGS"));
 
                 // CRO Sync runs this same script with the process variable CRO_RUNMODE = "sync" (not an input, so callers cannot set it).
+                if (InSafe(sp, "CRO_RUNMODE") == "signing") { Signing(sp, cfg, conn, ref dbg); return; }
                 if (InSafe(sp, "CRO_RUNMODE") == "sync")
                 {
                     result = Sync(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), ref dbg);
