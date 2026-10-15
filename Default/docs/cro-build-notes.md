@@ -85,8 +85,8 @@ Started: 2026-10-15.
 |---|---|---|---|---|
 | `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | config v3 (admins, receiver URL) | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `9cdf37a0d2a3252adefc5dd5146e9bd56fae815c45e3c96a1b77489549317b7a` |
 | `CRO_API_KEY` (secure server variable) | `CRO_API_KEY` | – | entry point only: Leigh enters a key, `key_migrate` encrypts it into `cro.secret`, then the variable is blanked | – |
-| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 12 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.7.0) | `a2e2b7a2aa3983551fef351e73c45b30cafa99496a44b649c598b133d13554be` (file; live = without final newline) |
-| `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | 6 (released) | same script as CRO API (cro-api 0.7.0); process variable `CRO_RUNMODE=sync` (not an input) | same as CRO API |
+| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | released 2026-10-15 with 0.7.0 (was v11) | `Default/tta/scripts/cro_api.cs` (cro-api 0.7.0) | `a2e2b7a2aa3983551fef351e73c45b30cafa99496a44b649c598b133d13554be` (file; live = without final newline) |
+| `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | released 2026-10-15 with 0.7.0 (was v5) | same script as CRO API (cro-api 0.7.0); process variable `CRO_RUNMODE=sync` (not an input) | same as CRO API |
 | `CRO_UI_JS` (text server variable) | `CRO_UI_JS` | cro-ui 0.2.2 (shell, nav, dashboard, send) | `Default/tta/CRO_UI_JS.js` | `54e24d1c90a90730d4e15afdd1f1b2acdc4b34ea35149e1e5a4649939ba7bd99` |
 | `CRO_Dashboard` (form, thin shell) | `9BEA4B2F0C424E2C80ACFF93591E5793` | 2 (released) | copy of DP_Home: header row + marker `data-cro-page="dashboard"` + loader action `jsCRO` → `CRO_UI_JS` | – |
 | `CRO_Send` / `CRO_Requests` / `CRO_Request` / `CRO_Users` (forms) | `05EC778DA27B4D089639CC849D166EB8` / `519EA033DDEB46E5886368CA29BB78E2` / `6E21070706A24F23ACC0B827A137E9E8` / `D76D95A953BC474498AD033D922448C4` | 2 (released) | copies of CRO_Dashboard with their own marker | – |
