@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.9.1";
+        private const string VERSION = "cro-api 0.9.2";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1452,6 +1452,31 @@ namespace Cro
                         Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "PUT", "/users/" + Uri.EscapeDataString(cid), body, ref dbg);
                         DbQuery(conn, "cro_api.user_set_circularo", "@UserId", uid, "@Status", st, "@Actor", who[1] + " (" + who[0] + ")");
                         result = "{\"userId\":" + uid + ",\"status\":" + JQ(st) + "}";
+                        break;
+                    }
+                    case "sdk_probe":
+                    {
+                        // Admin diagnostics: method signatures (and parameter type members) of a TotalAgility.Sdk service.
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string svcName = Arg(a, "service", 60), filter = Arg(a, "filter", 100);
+                        var asm = typeof(TotalAgility.Sdk.UserService).Assembly;
+                        var st = asm.GetType("TotalAgility.Sdk." + svcName, false);
+                        if (st == null) throw new Exception("No such service.");
+                        var outl = new List<object>();
+                        foreach (var mi in st.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                        {
+                            if (filter != "" && !System.Text.RegularExpressions.Regex.IsMatch(mi.Name, filter)) continue;
+                            var ps = new List<object>();
+                            foreach (var pi in mi.GetParameters())
+                            {
+                                var pt = pi.ParameterType; string desc = pi.Name + ":" + pt.FullName;
+                                if (pt.IsClass && pt != typeof(string) && !pt.IsArray && pt.Namespace != null && pt.Namespace.StartsWith("Agility"))
+                                    desc += " {" + string.Join(", ", Array.ConvertAll(pt.GetProperties(), x => x.Name + ":" + x.PropertyType.Name)) + "}";
+                                ps.Add(desc);
+                            }
+                            var m = new Dictionary<string, object>(); m["name"] = mi.Name; m["returns"] = mi.ReturnType.FullName; m["params"] = ps; outl.Add(m);
+                        }
+                        result = JSer(outl);
                         break;
                     }
                     case "user_list":
