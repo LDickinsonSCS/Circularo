@@ -77,7 +77,7 @@ Started: 2026-10-15.
 | 003a_option_columns.sql | Adds placement/adhoc_option/placement_used, share_to/internal_mode, oauth protection to tables made by the first 003 | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003a_option_columns.sql` | run 2026-10-15 (Leigh) |
 | 004_procedures.sql | 16 `cro_api` procedures (health, audit, request create/get/list/set_document/set_shares/set_state/outputs_done/due_check, webhook receive/next/done, user list/upsert/set_circularo); raises compat level to 130 if needed. Parsed clean with sqlfluff (tsql). | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 004_procedures.sql` | run 2026-10-15 (Leigh), re-run 21:27 with the acted_utc fix |
 | 006_outputs.sql | `cro.output_file` (signed / audit / certificate PDFs, sha256, has_signature) + `output_save/list/get` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 006_outputs.sql` | run 2026-10-15 (Leigh) |
-| 007_dashboard.sql | `cro.sync_heartbeat`, `cro.visible_requests()`, `sync_heartbeat`, `monitor_status`, `webhook_recent`, `dashboard_overview/reports/activity` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 007_dashboard.sql` | written, not yet run |
+| 007_dashboard.sql | `cro.sync_heartbeat`, `cro.visible_requests()`, `sync_heartbeat`, `monitor_status`, `webhook_recent`, `dashboard_overview/reports/activity` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 007_dashboard.sql` | run 2026-10-15 (Leigh) |
 | 005_secrets.sql | `cro.secret` (DPAPI ciphertext, fingerprint) + `secret_set/get/status` | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 005_secrets.sql` | written, not yet run | `sqlcmd -S .\SQLEXPRESS -E -d Circularo -b -I -i 003_core_tables.sql` | run 2026-10-15 (Leigh) |
 
 ## Live TTA items (category Circularo)
@@ -85,8 +85,8 @@ Started: 2026-10-15.
 |---|---|---|---|---|
 | `CRO_CONFIG` (text server variable) | `CRO_CONFIG` | config v3 (admins, receiver URL) | `Default/tta/CRO_CONFIG.min.json` (pretty: `CRO_CONFIG.json`) | `9cdf37a0d2a3252adefc5dd5146e9bd56fae815c45e3c96a1b77489549317b7a` |
 | `CRO_API_KEY` (secure server variable) | `CRO_API_KEY` | – | entry point only: Leigh enters a key, `key_migrate` encrypts it into `cro.secret`, then the variable is blanked | – |
-| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 10 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.6.0) | `4acf0fbece7c213ba97c77a40e9b8491e44302ad52262066b8b09daf9aa2eb79` (file; live = without final newline) |
-| `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | 4 (released) | same script as CRO API; process variable `CRO_RUNMODE=sync` (not an input) | live `41749d44f49c…` |
+| `CRO API` (sync process) | `66799B626B1B411EB6FFFA0D0EF5270C` | 11 (released) | `Default/tta/scripts/cro_api.cs` (cro-api 0.6.1) | `7fca6f2543c489ead7912b79a094acaf9b5816fe35dfc7a183e8509aa5623552` (file; live = without final newline) |
+| `CRO Sync` (async process) | `444C34DDCB8E4CE3BFC7D553688E92FB` | 5 (released) | same script as CRO API; process variable `CRO_RUNMODE=sync` (not an input) | live `41749d44f49c…` |
 | Job schedule `CRO Sync - every 2 minutes` | ScheduleId `A67CA440EF924666B53D4ADEC15FCABD` | active | – | – |
 | Circularo webhook | `4PSeQKEB_eIBv4MnskB-` (organization) | – | callback `https://portal.sudocodesolutions.com/cro-webhook/receive.ashx`; HMAC secret DPAPI in `cro.secret` (fingerprint `2c8bb95309136469`) | – |
 | Webhook receiver (IIS) | app `cro-webhook` on portal | deployed 2026-10-15 (Leigh) | `Default/webhook/receive.ashx`, `web.config`, `README.md` | – |
@@ -94,6 +94,7 @@ Started: 2026-10-15.
 `CRO API` ops so far: version, whoami, health, config, circularo_ping, circularo_check, key_migrate*, key_status*, keycheck*, request_create, request_get, request_list, request_send, request_refresh, request_outputs, output_list, output_get, dashboard, monitor*, webhook_recent*, sync_now*, webhook_list*, webhook_setup*, webhook_delete*, user_list (* = admins in CRO_CONFIG.admins only). Inputs OP, ARGS, SESSIONTOKEN, SPP_SYSTEM_SESSION_ID, CRO_CONFIG, AWF_JOBID; outputs RESULT, ERROR, DEBUG. Local compile check: `mcs -langversion:5` against `scripts/stubs/tta_stubs.cs`.
 
 ## Decisions & gotchas log
+- 2026-10-15: TTA resource email: server-side `TotalAgility.Sdk.ResourceService.GetResourceSummary(session, ResourceIdentity)` → `EmailAddress` (`GetResource` does not exist).
 - 2026-10-15: **Dashboard requested (Leigh)** "along the lines of Circularo's": quick-start tiles (Sign now / We sign / They sign), overview counters, status donut, volume over time, success/turnaround, placement mix, recent activity, and an admin integration-health panel. Scope Mine/All. Design section added.
 - 2026-10-15: **TTA strips the final newline of a script on save** – compare hashes of the trimmed text (live CRO API = file minus trailing `\n`).
 - 2026-10-15: `CreateProcessBasedOnExisting` copies the **released** version of the base; set the node script explicitly on the copy.
@@ -123,6 +124,7 @@ Started: 2026-10-15.
 - GitHub repo moved to `LDickinsonSCS/Circularo` (capital C); remote updated.
 
 ## Verified
+- 2026-10-15 22:49: Dashboard data checked against requests 1–3: completed 3; success 3/3, avg 6.7 min (3–9); placement anchors 2 / default_position 1; activity feed and webhook list (5 events incl. the bad-signature self-test, ignored) correct. Caller email resolved via `ResourceService.GetResourceSummary` → `EmailAddress`. Heartbeat recorded by manual and scheduled CRO Sync runs.
 - 2026-10-15 22:37–22:38: **Fully automatic completion.** Leigh signed request 3 → Circularo events arrived (valid HMAC) → scheduled CRO Sync at 18:37:58Z marked it completed, recipient signed, and stored outputs by 18:38:04Z (signed 71,792 bytes with signature; audit; certificate). No manual calls.
 - 2026-10-15 22:34: Receiver live: GET → `{"service":"cro-webhook","ok":true}`; POST with a bad signature → 200 (stored, flagged invalid).
 - 2026-10-15 22:34–22:36: **Webhook chain proven.** Request 3 (NDA, doc `52dfd1f7-e99a-44d8-b7cc-9ac74c6e7e49`, share `E_TYQKEB_eIBv4MnOEEF`): 2 events arrived from Circularo with **valid HMAC** and matched to the request; the scheduled CRO Sync job processed them at 18:35:57Z (`last_event_utc` set, `last_checked_utc` null → no polling involved).

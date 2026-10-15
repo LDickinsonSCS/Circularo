@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.6.0";
+        private const string VERSION = "cro-api 0.6.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -833,7 +833,7 @@ namespace Cro
                     foreach (var mi in rt.GetMethods())
                     {
                         var ps = mi.GetParameters();
-                        if (mi.Name != "GetResource" || ps.Length != 2 || ps[0].ParameterType != typeof(string)) continue;
+                        if ((mi.Name != "GetResourceSummary" && mi.Name != "GetWorkerResource") || ps.Length != 2 || ps[0].ParameterType != typeof(string)) continue;
                         object idArg = ps[1].ParameterType == typeof(string) ? (object)resourceId : Activator.CreateInstance(ps[1].ParameterType);
                         if (!(idArg is string)) { var pid = idArg.GetType().GetProperty("Id"); if (pid != null) pid.SetValue(idArg, resourceId, null); }
                         var r = mi.Invoke(svc, new object[] { systemSession, idArg });
