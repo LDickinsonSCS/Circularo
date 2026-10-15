@@ -1474,7 +1474,7 @@ namespace Cro
                                     desc += " {" + string.Join(", ", Array.ConvertAll(pt.GetProperties(), x => x.Name + ":" + x.PropertyType.Name)) + "}";
                                 ps.Add(desc);
                             }
-                            var m = new Dictionary<string, object>(); m["name"] = mi.Name; m["returns"] = mi.ReturnType.FullName; m["params"] = ps; outl.Add(m);
+                            var rt = mi.ReturnType; var m = new Dictionary<string, object>(); m["name"] = mi.Name; m["returns"] = rt.FullName + (rt.Namespace != null && rt.Namespace.StartsWith("Agility") ? " {" + string.Join(", ", Array.ConvertAll(rt.GetProperties(), x => x.Name + ":" + x.PropertyType.Name)) + "}" : ""); m["params"] = ps; outl.Add(m);
                         }
                         result = JSer(outl);
                         break;
