@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.2.1';
+  var VERSION = 'cro-ui 0.2.2';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -392,10 +392,11 @@
         var lay = L[S.layout]; if (!lay) return '';
         return opt('', '(no field – default position)', !cur) + (lay.roles || []).map(function (ro) { return opt(ro.role, ro.role.replace(/_/g, ' '), cur === ro.role); }).join('');
       };
+      var showOrder = function () { return S.sequential && mode !== 'signnow'; };
       var rowHtml = function (x, i) {
         var ext = x.kind === 'external', lock = x.me;
         return '<tr data-i="' + i + '">' +
-          (S.sequential ? '<td><input class="cro-in" style="width:56px" type="number" min="1" max="20" data-k="order" value="' + esc(x.order) + '"></td>' : '') +
+          (showOrder() ? '<td><input class="cro-in" style="width:56px" type="number" min="1" max="20" data-k="order" value="' + esc(x.order) + '"></td>' : '') +
           '<td><input class="cro-in" data-k="fullName" placeholder="Full name" value="' + esc(x.fullName) + '"' + (lock ? ' disabled' : '') + '></td>' +
           '<td><input class="cro-in" data-k="email" list="croUsers" placeholder="name@company.com" value="' + esc(x.email) + '"' + (lock ? ' disabled' : '') + '>' + (lock ? '<div class="cro-hint">You</div>' : '') + '</td>' +
           '<td><select class="cro-in" data-k="kind"' + (lock ? ' disabled' : '') + '>' + opt('internal', 'Internal', !ext) + opt('external', 'External', ext) + '</select></td>' +
@@ -436,7 +437,7 @@
           '</div></div>' +
           '<div class="cro-card" style="margin-top:16px"><h2>3. Recipients <small>' + (mode === 'signnow' ? 'just you' : S.rcps.length + ' of up to 100') + '</small></h2>' +
             (mode !== 'signnow' ? '<label class="cro-check"><input type="checkbox" id="croSeq"' + (S.sequential ? ' checked' : '') + '> Signing order (same number = sign in parallel)</label>' : '') +
-            '<table class="cro-table cro-rcp"><tr>' + (S.sequential ? '<th>Order</th>' : '') + '<th>Name</th><th>Email</th><th>Type</th><th>Action</th><th>Security</th>' + (lay ? '<th>Field</th>' : '') + '<th></th></tr>' +
+            '<table class="cro-table cro-rcp"><tr>' + (showOrder() ? '<th>Order</th>' : '') + '<th>Name</th><th>Email</th><th>Type</th><th>Action</th><th>Security</th>' + (lay ? '<th>Field</th>' : '') + '<th></th></tr>' +
             S.rcps.map(rowHtml).join('') + '</table>' +
             '<datalist id="croUsers">' + USERS.map(function (u) { return '<option value="' + esc(u.email) + '">' + esc(u.full_name) + '</option>'; }).join('') + '</datalist>' +
             (mode !== 'signnow' ? '<div style="margin-top:12px;display:flex;gap:8px"><button class="cro-btn2" id="croAdd">+ Add recipient</button>' + (mode === 'theysign' && !S.rcps.some(function (x) { return x.me; }) ? '<button class="cro-btn2" id="croAddMe">+ Add me</button>' : '') + '</div>' : '') +
