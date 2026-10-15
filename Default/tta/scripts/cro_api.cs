@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.9.0";
+        private const string VERSION = "cro-api 0.9.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -958,9 +958,16 @@ namespace Cro
             {
                 var x = JO(o, "_source") ?? o;
                 var u = new Dictionary<string, object>();
-                u["id"] = JS(x, "id") != "" ? JS(x, "id") : JS(o, "_id");
                 u["name"] = JS(x, "name"); u["fullname"] = JS(x, "fullname"); u["mail"] = JS(x, "mail"); u["status"] = JS(x, "status");
-                var gl = JL(x, "group"); u["groups"] = gl ?? new List<object>();
+                u["id"] = JS(x, "id") != "" ? JS(x, "id") : JS(o, "_id") != "" ? JS(o, "_id") : JS(x, "name");
+                var gl = JL(x, "group");
+                if ((JS(x, "status") == "" || gl == null) && JS(x, "name") != "" && outl.Count < 200)
+                {
+                    // search results are abridged: read status and groups from the user record (only these fields are kept)
+                    try { var d = Cx(cfg, key, "GET", "/users/" + Uri.EscapeDataString(JS(x, "name")), null, ref dbg); u["status"] = JS(d, "status"); gl = JL(d, "group"); u["recordType"] = JS(d, "recordType"); }
+                    catch (Exception ex) { dbg += "user " + JS(x, "name") + ": " + Inner(ex) + " "; }
+                }
+                u["groups"] = gl ?? new List<object>();
                 outl.Add(u);
             }
             return outl;
