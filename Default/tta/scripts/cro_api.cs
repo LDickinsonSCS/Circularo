@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.6.1";
+        private const string VERSION = "cro-api 0.7.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -933,6 +933,52 @@ namespace Cro
             return JSer(info);
         }
 
+        // ---- signing link for the caller (must be a recipient of the request) ----
+        private static string SignUrl(object cfg, string conn, string key, string email, string resourceId, long requestId, ref string dbg)
+        {
+            var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId)) as List<object>;
+            var req = FirstRow(JSer(got));
+            if (req == null) throw new Exception("Request not found.");
+            if (JS(req, "state") != "inprogress") throw new Exception("The request is " + JS(req, "state") + "; there is nothing to sign.");
+            string docId = JS(req, "circularo_document_id");
+            var rcps = got.Count > 1 ? got[1] as List<object> : new List<object>();
+            Dictionary<string, object> me = null;
+            foreach (var ro in rcps)
+            {
+                var r = ro as Dictionary<string, object>;
+                if (email != "" && string.Equals(JS(r, "email"), email, StringComparison.OrdinalIgnoreCase) && JS(r, "status") != "signed") { me = r; break; }
+            }
+            if (me == null) throw new Exception("You are not a waiting recipient of this request.");
+            string fe = JS(JO(cfg, "circularo"), "frontendBase").TrimEnd('/');
+            string docType = JS(req, "document_type") == "" ? JS(JO(cfg, "circularo"), "documentType") : JS(req, "document_type");
+            var res = new Dictionary<string, object>();
+            res["requestId"] = (double)requestId; res["documentId"] = docId; res["status"] = JS(me, "status");
+            bool isExt = JS(me, "kind") == "external" || JS(me, "internal_mode") == "as_external";
+            if (!isExt)
+            {
+                res["mode"] = "circularo_login";
+                res["url"] = fe + "/#!/sign?documentId=" + Uri.EscapeDataString(docId) + "&documentType=" + Uri.EscapeDataString(docType);
+                res["note"] = "Sign in to Circularo as " + JS(me, "share_to") + " if asked.";
+            }
+            else
+            {
+                string sid = JS(me, "share_id");
+                if (sid == "") throw new Exception("This recipient has no Circularo share id yet.");
+                var v = Cx(cfg, key, "GET", "/share/" + Uri.EscapeDataString(sid) + "/validate", null, ref dbg);
+                string tok = JS(v, "shareToken"); if (tok == "") tok = JS(v, "token"); if (tok == "") tok = JS(JO(v, "share"), "shareToken");
+                if (tok == "") { string t = JSer(v); dbg += "validate: " + (t.Length > 400 ? t.Substring(0, 400) : t) + " "; throw new Exception("Circularo did not return a share token."); }
+                res["mode"] = "external_link";
+                res["url"] = fe + "/share?shareToken=" + Uri.EscapeDataString(tok);
+                res["note"] = "Circularo will email a code to " + JS(me, "email") + ".";
+            }
+            DbQuery(conn, "cro_api.audit_write", "@Actor", email + " (" + resourceId + ")", "@Action", "sign_url", "@Outcome", "ok", "@RequestId", requestId, "@Detail", JS(res, "mode"));
+            return JSer(res);
+        }
+        private static bool IsCreatorOrAdmin(object cfg, Dictionary<string, object> req, string resourceId)
+        {
+            return string.Equals(JS(req, "created_by_resource_id"), resourceId, StringComparison.OrdinalIgnoreCase) || IsAdmin(cfg, resourceId);
+        }
+
         [StartMethodAttribute()]
         public void Run(ScriptParameters sp)
         {
@@ -1188,6 +1234,46 @@ namespace Cro
                         if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
                         int max; if (!int.TryParse(Arg(a, "max", 4), out max)) max = 50;
                         result = DbQuery(conn, "cro_api.webhook_recent", "@Max", max);
+                        break;
+                    }
+                    case "me":
+                    {
+                        string em = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
+                        result = "{\"id\":" + JQ(who[0]) + ",\"name\":" + JQ(who[1]) + ",\"email\":" + JQ(em) + ",\"isAdmin\":" + (IsAdmin(cfg, who[0]) ? "true" : "false") + "}";
+                        break;
+                    }
+                    case "sign_url":
+                    {
+                        // ARGS: { requestId }  -> { url, mode, note }  The caller must be a waiting recipient.
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        string em = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
+                        result = SignUrl(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), em, who[0], rid, ref dbg);
+                        break;
+                    }
+                    case "request_cancel":
+                    {
+                        // ARGS: { requestId, reason? }  Creator or admin. Disables every share (Circularo cancels the whole process).
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", rid)) as List<object>;
+                        var rq = FirstRow(JSer(got));
+                        if (rq == null) throw new Exception("Request not found.");
+                        if (!IsCreatorOrAdmin(cfg, rq, who[0])) throw new Exception("Only the person who created the request can cancel it.");
+                        string reason = Arg(a, "reason", 500); if (reason == "") reason = "Cancelled from TotalAgility";
+                        string st = JS(rq, "state");
+                        if (st == "draft" || st == "failed")
+                        {
+                            DbQuery(conn, "cro_api.request_set_state", "@RequestId", rid, "@State", "cancelled", "@Reason", reason, "@Source", "user", "@Actor", who[1] + " (" + who[0] + ")");
+                            result = "{\"requestId\":" + rid + ",\"state\":\"cancelled\",\"circularo\":false}";
+                            break;
+                        }
+                        if (st != "inprogress") throw new Exception("The request is " + st + " and cannot be cancelled.");
+                        var ids = new List<object>();
+                        foreach (var ro in (got.Count > 1 ? got[1] as List<object> : new List<object>())) if (JS(ro, "share_id") != "") ids.Add(JS(ro, "share_id"));
+                        if (ids.Count == 0) throw new Exception("No Circularo shares recorded for this request.");
+                        var body = new Dictionary<string, object>(); body["shareIds"] = ids;
+                        Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "PUT", "/share/disable", body, ref dbg);
+                        DbQuery(conn, "cro_api.request_set_state", "@RequestId", rid, "@State", "cancelled", "@Reason", reason, "@Source", "user", "@Actor", who[1] + " (" + who[0] + ")");
+                        result = "{\"requestId\":" + rid + ",\"state\":\"cancelled\",\"circularo\":true,\"shares\":" + ids.Count + "}";
                         break;
                     }
                     case "user_list":
