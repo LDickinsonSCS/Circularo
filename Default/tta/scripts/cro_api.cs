@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.10.0";
+        private const string VERSION = "cro-api 0.10.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1043,7 +1043,7 @@ namespace Cro
                 try
                 {
                     var id = Cap("CreateDocument3", session, Reporting(), folderId, null, "", input, idx);
-                    string s = Convert.ToString(GetP(id, "Id") ?? id);
+                    string s = Convert.ToString(GetP(id, "DocumentId") ?? GetP(id, "Id") ?? id);
                     if (s != "") return s;
                 }
                 catch (Exception e) { last = e; }
