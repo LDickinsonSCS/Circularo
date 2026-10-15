@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.8.0";
+        private const string VERSION = "cro-api 0.8.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1272,7 +1272,13 @@ namespace Cro
                         if (ids.Count == 0) throw new Exception("No Circularo shares recorded for this request.");
                         var body = new Dictionary<string, object>(); body["shareIds"] = ids;
                         Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "PUT", "/share/disable", body, ref dbg);
-                        DbQuery(conn, "cro_api.request_set_state", "@RequestId", rid, "@State", "cancelled", "@Reason", reason, "@Source", "user", "@Actor", who[1] + " (" + who[0] + ")");
+                        var cupd = new List<object>();
+                        foreach (var ro in (got.Count > 1 ? got[1] as List<object> : new List<object>()))
+                        {
+                            var e = new Dictionary<string, object>(); e["recipientId"] = JN(ro, "recipient_id");
+                            e["status"] = JS(ro, "status") == "signed" ? "signed" : "cancelled"; cupd.Add(e);
+                        }
+                        DbQuery(conn, "cro_api.request_set_state", "@RequestId", rid, "@State", "cancelled", "@Reason", reason, "@RecipientsJson", JSer(cupd), "@Source", "user", "@Actor", who[1] + " (" + who[0] + ")");
                         result = "{\"requestId\":" + rid + ",\"state\":\"cancelled\",\"circularo\":true,\"shares\":" + ids.Count + "}";
                         break;
                     }

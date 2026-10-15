@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.3.1';
+  var VERSION = 'cro-ui 0.3.2';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -674,7 +674,7 @@
             '<div class="cro-card"><h2>Details</h2><div class="cro-kv">' +
               kv('Request', '#' + esc(R.request_id)) + kv('Reference', esc(R.business_ref || '')) +
               kv('Sent by', esc(who(R.created_by_name))) + kv('Created', esc(when(R.created_utc))) + kv('Sent', R.sent_utc ? esc(when(R.sent_utc)) : '') +
-              kv('Deadline', R.valid_until_utc ? esc(when(R.valid_until_utc)) : '') + kv('Completed', R.completed_utc ? esc(when(R.completed_utc)) : '') +
+              kv('Deadline', R.valid_until_utc ? esc(when(R.valid_until_utc)) : '') + kv(R.state === 'completed' ? 'Completed' : 'Closed', R.completed_utc ? esc(when(R.completed_utc)) : '') +
               kv('Layout', esc(R.layout_key || 'none (ad hoc)')) + kv('Fields placed by', esc(R.placement_used || R.placement)) +
               kv('Last update', R.last_event_utc || R.last_checked_utc ? esc(ago(R.last_event_utc > R.last_checked_utc ? R.last_event_utc : (R.last_checked_utc || R.last_event_utc))) : '') +
               kv('Circularo id', R.circularo_document_id ? '<span class="cro-mono">' + esc(R.circularo_document_id.slice(0, 8)) + '…</span>' : '') +
