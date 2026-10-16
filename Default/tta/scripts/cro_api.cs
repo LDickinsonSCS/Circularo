@@ -1429,7 +1429,7 @@ namespace Cro
             v["action"] = HtmlEnc(JS(r, "share_purpose") == "approve" ? "approve" : JS(r, "share_purpose") == "review" ? "review" : JS(r, "share_purpose") == "accept" ? "accept" : "sign");
             v["howto"] = link[1] == "external_link" ? "Circularo will email you a one-time code when you open the link." : "Sign in to Circularo with your account if asked.";
             string q = ((char)34).ToString();
-            string subject = Fill(JS(rc, "subject") != "" ? JS(rc, "subject") : "Reminder: please {action} " + q + "{title}" + q, v).Replace("&quot;", q).Replace("&#39;", "'").Replace("&amp;", "&");
+            string subject = Fill(JS(rc, "subject") != "" ? JS(rc, "subject") : "Reminder: please {action} " + q + "{title}" + q, v).Replace("&" + "quot;", q).Replace("&" + "#39;", "'").Replace("&" + "amp;", "&");   // entities split: TotalAgility decodes HTML entities in script text
             string body = Fill(JS(rc, "body") != "" ? JS(rc, "body") :
                 "<p>Dear {name},</p><p>{sender} is waiting for you to {action} <b>{title}</b>{deadline_text}.</p><p><a href='{url}'>Open the document in Circularo</a></p><p>{howto}</p><p style='color:#667085;font-size:12px'>Sent by CRO e-Signing (TotalAgility).</p>", v)
                 .Replace("{deadline_text}", deadline == "" ? "" : " by " + HtmlEnc(deadline));
