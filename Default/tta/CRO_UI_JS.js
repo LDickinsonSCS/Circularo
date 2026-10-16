@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.11.0';
+  var VERSION = 'cro-ui 0.11.1';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -216,7 +216,7 @@
     if (marker) marker.style.display = 'none';
     document.body.style.margin = '0'; document.body.style.background = '#F6F7FB';
     root.innerHTML =
-      '<div class="cro-top"><a class="cro-brand" href="' + link('dashboard') + '"><i><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i>CRO e-Signing</a>' +
+      '<div class="cro-top"><a class="cro-brand" href="' + link('dashboard') + '"><i><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i>My e-Signing</a>' +
       '<nav class="cro-nav">' +
       [['dashboard', 'Dashboard'], ['send', 'Send for signature'], ['requests', 'Requests'], ['users', 'Users']].map(function (p) {
         return '<a href="' + link(p[0]) + '"' + (page === p[0] || (page === 'request' && p[0] === 'requests') ? ' class="on"' : '') + '>' + p[1] + '</a>';
@@ -1006,7 +1006,7 @@
   cro('whoami', {}).then(function (u) { var el = document.getElementById('croMe'); if (el) el.textContent = u.name || ''; }).catch(function () { });
   var renderGate = function (a) {
     main().innerHTML = '<div class="cro-card cro-done"><div class="big" style="background:#FEF0C7;color:#B54708">!</div><h1>A Circularo account is needed</h1>' +
-      '<p>' + esc(a.reason || 'Your user has no Circularo account.') + '</p><p class="cro-sub">CRO e-Signing uses your own Circularo account to sign and send documents.</p>' +
+      '<p>' + esc(a.reason || 'Your user has no Circularo account.') + '</p><p class="cro-sub">My e-Signing uses your own Circularo account to sign and send documents.</p>' +
       (a.pendingRequest ? '<p><b>Your request was sent to the administrators ' + esc(ago(a.pendingRequest)) + '.</b> You will get an email from Circularo when your account is ready.</p>'
         : '<div class="cro-f" style="max-width:460px;margin:12px auto;text-align:left"><label>Note to the administrators (optional)</label><textarea class="cro-in" id="croNote" rows="2" maxlength="900"></textarea></div>' +
           '<div class="cro-actions" style="justify-content:center"><button class="cro-btn" id="croAsk">Ask an administrator for an account</button></div>') + '</div>';

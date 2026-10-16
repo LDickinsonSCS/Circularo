@@ -12,7 +12,7 @@
     paper: '#F6F7FB', ink: '#1B1B2F', mute: '#5B6472', line: '#DADFEA'
   };
   var T = {
-    title: 'CRO e-Signing',
+    title: 'My e-Signing',
     headline: ['Signed in Circularo.', 'Filed in TotalAgility.'],
     sub: 'Send documents for signature from your TotalAgility work, follow every signer, and get the signed copy, audit trail and certificate back automatically.',
     steps: ['Prepared in TotalAgility', 'Signed in Circularo', 'Filed back in TotalAgility'],
