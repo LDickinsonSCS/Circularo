@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.9.0';
+  var VERSION = 'cro-ui 0.10.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -38,7 +38,7 @@
       return r.json().then(function (j) {
         if (!r.ok || !j || j.d === undefined) {
           var msg = (j && j.Message) || ('HTTP ' + r.status);
-          if (/Invalid Session/i.test(msg)) msg = 'Your session has expired. Please refresh the page or sign in again.';
+          if (/Invalid Session/i.test(msg)) { msg = 'Your session has expired. Taking you to the sign-in page…'; setTimeout(toLogin, 800); }
           throw new Error(msg);
         }
         return j.d;
@@ -169,6 +169,7 @@
     '.cro-fld{position:absolute;border:2px dashed;border-radius:4px;font-size:11px;font-weight:600;cursor:move;display:flex;align-items:center;padding:0 4px;overflow:hidden;white-space:nowrap}',
     '.cro-fld b{margin-left:auto;cursor:pointer;font-size:14px;padding:0 2px}',
     '.cro-groups{margin-top:10px;display:flex;flex-direction:column;gap:6px;color:var(--cro-sub);font-size:13px}.cro-rights{margin-top:4px}',
+    '.cro-out{border:1px solid var(--cro-line);background:#fff;color:var(--cro-sub);border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;margin-left:12px}.cro-out:hover{color:var(--cro-bad);border-color:#FDA29B}',
     '.cro-foot{color:var(--cro-mute);font-size:12px;text-align:center;padding:24px}',
     'svg text{font-family:"Segoe UI",Arial,sans-serif}'
   ].join('\n');
@@ -204,11 +205,22 @@
       '<nav class="cro-nav">' +
       [['dashboard', 'Dashboard'], ['send', 'Send for signature'], ['requests', 'Requests'], ['users', 'Users']].map(function (p) {
         return '<a href="' + link(p[0]) + '"' + (page === p[0] || (page === 'request' && p[0] === 'requests') ? ' class="on"' : '') + '>' + p[1] + '</a>';
-      }).join('') + '</nav><span class="cro-me" id="croMe"></span></div>' +
+      }).join('') + '</nav><span class="cro-me" id="croMe"></span><button class="cro-out" id="croOut" title="Sign out">Sign out</button></div>' +
       '<div class="cro-main" id="croMain"><div class="cro-skel">Loading…</div></div>' +
       '<div class="cro-foot">TotalAgility × Circularo · ' + VERSION + '</div>';
   };
+  var LOGIN_URL = BASE + '/forms/cro';                         // friendly alias (IIS) for the CRO sign-in form
+  var LOGIN_FORM = FORMS + 'CRO_Login.form';
+  var signOut = function () {
+    var done = function () {
+      try { ['SESSION_ID', 'TASessionID', 'croAccessOk', 'croReturn'].forEach(function (k) { sessionStorage.removeItem(k); }); } catch (e) { }
+      location.href = LOGIN_URL;
+    };
+    sdk('UserService', 'LogOff', {}).then(done, done);
+  };
+  var toLogin = function () { location.href = LOGIN_FORM + '?return=' + encodeURIComponent(location.pathname + location.search); };
   var main = function () { return document.getElementById('croMain'); };
+  document.addEventListener('click', function (e) { if (e.target && e.target.id === 'croOut') { e.target.disabled = true; signOut(); } });
   var fail = function (e) { main().innerHTML = '<div class="cro-err">' + esc(e && e.message || e) + '</div>'; };
 
   /* ---------- charts (inline SVG) ---------- */
@@ -993,6 +1005,7 @@
   var ACCESS_KEY = 'croAccessOk';
   var gate = (function () { try { var c = JSON.parse(sessionStorage.getItem(ACCESS_KEY) || 'null'); if (c && Date.now() - c.t < 600000) return Promise.resolve(c.a); } catch (e) { } return cro('access_check', {}); })();
   gate.then(function (a) {
+    try { var back = sessionStorage.getItem('croReturn'); if (back) { sessionStorage.removeItem('croReturn'); if (back !== location.pathname + location.search) { location.href = back; return; } } } catch (e) { }
     if (!a.allowed) return renderGate(a);
     try { sessionStorage.setItem(ACCESS_KEY, JSON.stringify({ t: Date.now(), a: a })); } catch (e) { }
     if (a.autoCreated) toast('A Circularo account was created for you: check your email to set your password.');
