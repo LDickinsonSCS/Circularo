@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.8.0';
+  var VERSION = 'cro-ui 0.8.1';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -562,7 +562,7 @@
           placerHtml() +
           '<div class="cro-card" style="margin-top:16px"><h2>4. Options</h2><div class="cro-grid cro-g3">' +
             '<div class="cro-f"><label>Deadline</label><input class="cro-in" type="date" id="croDeadline" value="' + esc(S.deadline) + '"></div>' +
-            '<div class="cro-f"><label>Reminders</label><div class="cro-ro">' + (D.reminders && D.reminders.intervalDays ? 'Every ' + D.reminders.intervalDays + ' days, starting after ' + D.reminders.startDays + ' days' : 'Off') + '</div></div>' +
+            '<div class="cro-f"><label>Reminders</label><div class="cro-ro">' + (CFG.reminders && CFG.reminders.by === 'tta' ? 'TotalAgility emails a link after ' + (CFG.reminders.firstAfterHours || 48) + ' h, then every ' + (CFG.reminders.everyHours || 48) + ' h (max ' + (CFG.reminders.max || 5) + ')' : D.reminders && D.reminders.intervalDays ? 'Circularo: every ' + D.reminders.intervalDays + ' days, starting after ' + D.reminders.startDays + ' days' : 'Off') + '</div></div>' +
             '<div class="cro-f"><label>After sending</label><div class="cro-ro">Circularo emails each recipient' + (mode !== 'theysign' ? '; you can also sign from here' : '') + '</div></div>' +
           '</div>' +
           '<div class="cro-grid cro-g11"><div class="cro-f"><label>Message to recipients (optional)</label><textarea class="cro-in" id="croMsgTxt" rows="3" maxlength="1000">' + esc(S.message) + '</textarea></div>' +
@@ -832,7 +832,7 @@
           '</div>';
         var on = function (idv, fn) { var b = document.getElementById(idv); if (b) b.onclick = function () { fn(b); }; };
         on('croSign', function (b) { openSigning(+id, b); });
-        on('croRemind', function (b) { b.disabled = true; cro('request_remind', { requestId: +id }).then(function (r) { toast('Reminder sent to ' + r.reminded + ' recipient(s).'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
+        on('croRemind', function (b) { b.disabled = true; cro('request_remind', { requestId: +id }).then(function (r) { toast((r.by === 'tta' ? 'Reminder email with the signing link sent to ' : 'Reminder sent to ') + r.reminded + ' recipient(s).'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
         on('croImport', function (b) { b.disabled = true; cro('request_import', { requestId: +id }).then(function (r) { toast(r.imported ? r.imported + ' recipient(s) imported from Circularo.' : 'Not sent from the Circularo editor yet.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
         on('croRefresh', function (b) { b.disabled = true; cro('request_refresh', { requestId: +id }).then(function () { toast('Status updated from Circularo.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
         on('croOutputs', function (b) { b.disabled = true; cro('request_outputs', { requestId: +id }).then(function () { toast('Signed copy stored.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });

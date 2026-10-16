@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "note": "CRO configuration. Read-only at runtime. No secrets here: the Circularo API key is the secure server variable CRO_API_KEY.",
   "circularo": {
     "apiBase": "https://sudocode.sandbox.circularo.com/api/v1",
@@ -18,8 +18,9 @@
     "sequential": true,
     "deadlineDays": 14,
     "reminders": {
-      "startDays": 2,
-      "intervalDays": 2
+      "startDays": 0,
+      "intervalDays": 0,
+      "note": "Circularo automatic reminders off: TotalAgility sends reminders (see reminders)"
     },
     "externalProtection": "email_otp",
     "internalMode": "circularo_login",
@@ -769,5 +770,15 @@
   "admins": [
     "75DBAF25C8254433904AF5F0A2660A81"
   ],
-  "adminsNote": "TTA resource ids allowed to run CRO admin operations (key management). To be replaced by the CRO Admins group."
+  "adminsNote": "TTA resource ids allowed to run CRO admin operations (key management). To be replaced by the CRO Admins group.",
+  "reminders": {
+    "by": "tta",
+    "firstAfterHours": 48,
+    "everyHours": 48,
+    "max": 5,
+    "from": "",
+    "subject": "",
+    "body": "",
+    "note": "by = tta: CRO Sync emails waiting recipients through TotalAgility with the link to their Circularo signing page; empty subject/body = built-in text; placeholders {name} {title} {url} {sender} {deadline} {action} {howto}. by = circularo: Circularo's own reminders (set defaults.reminders.intervalDays)."
+  }
 }

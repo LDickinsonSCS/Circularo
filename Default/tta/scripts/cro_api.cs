@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.17.0";
+        private const string VERSION = "cro-api 0.18.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -884,6 +884,7 @@ namespace Cro
             if (signedHash == "" && state == "completed") signedHash = JS(JO(doc, "pdfFile"), "content");
             DbQuery(conn, "cro_api.request_set_state", "@RequestId", requestId, "@State", state, "@Reason", Nz(st == "" ? "" : "Circularo: " + st),
                     "@SignedFileHash", Nz(signedHash), "@RecipientsJson", JSer(upd), "@Source", source, "@Actor", "system");
+            try { DbQuery(conn, "cro_api.recipients_turn_mark", "@RequestId", requestId); } catch (Exception ex) { dbg += "turn mark: " + Inner(ex) + " "; }
             var res = new Dictionary<string, object>();
             res["requestId"] = (double)requestId; res["documentId"] = docId; res["circularoState"] = st; res["state"] = state;
             res["isSigned"] = JS(doc, "isSigned"); res["waitingFor"] = new List<object>(new List<string>(waiting).ToArray()); res["hasTurn"] = new List<object>(new List<string>(turn).ToArray()); res["recipients"] = upd;
@@ -893,7 +894,7 @@ namespace Cro
         // ---- background sync (CRO Sync process, run mode "sync") ----
         // 1. webhook inbox: refresh each request that has unprocessed events, mark events done
         // 2. polling safety net: requests with no event for a while, near deadline, or completed without outputs
-        private static string Sync(object cfg, string conn, string key, ref string dbg)
+        private static string Sync(object cfg, string conn, string key, string sessionForMail, ref string dbg)
         {
             var sc = JO(cfg, "sync");
             int batch = (int)(JN(sc, "batch") > 0 ? JN(sc, "batch") : 50);
@@ -932,6 +933,8 @@ namespace Cro
                 var l = new Dictionary<string, object>(); l["requestId"] = (double)rid; l["via"] = "poll"; l["result"] = outcome; log.Add(l);
             }
             var res = new Dictionary<string, object>();
+            try { string rs = RemindersDue(cfg, conn, key, sessionForMail, ref dbg); if (rs != "off" && !rs.StartsWith("0 sent, 0 failed")) res["reminders"] = rs; }
+            catch (Exception ex) { dbg += "reminders: " + Inner(ex) + " "; }
             res["events"] = (double)events.Count; res["requests"] = (double)log.Count; res["ok"] = (double)ok; res["failed"] = (double)failed; res["log"] = log;
             string summary = JSer(res);
             try { DbQuery(conn, "cro_api.sync_heartbeat", "@Events", events.Count, "@Requests", log.Count, "@Failed", failed, "@Summary", summary.Length > 3900 ? summary.Substring(0, 3900) : summary); }
@@ -1375,6 +1378,82 @@ namespace Cro
             throw new Exception("Circularo did not finish converting the Word file to PDF within 60 seconds.");
         }
 
+        // ---- reminders sent by TotalAgility (email with the signing link) ----
+        // Link to the Circularo signing page for one recipient: external share -> /share?shareToken=..., internal -> /#!/sign?...
+        private static string[] RecipientLink(object cfg, string key, Dictionary<string, object> r, string docId, string docType, ref string dbg)
+        {
+            string fe = JS(JO(cfg, "circularo"), "frontendBase").TrimEnd('/');
+            if (docType == "") docType = JS(JO(cfg, "circularo"), "documentType");
+            string internalUrl = fe + "/#!/sign?documentId=" + Uri.EscapeDataString(docId) + "&documentType=" + Uri.EscapeDataString(docType);
+            bool isExt = JS(r, "kind") == "external" || JS(r, "internal_mode") == "as_external";
+            if (isExt && JS(r, "share_id") != "")
+            {
+                try
+                {
+                    var v = Cx(cfg, key, "GET", "/share/" + Uri.EscapeDataString(JS(r, "share_id")) + "/validate", null, ref dbg);
+                    string tok = JS(v, "shareToken"); if (tok == "") tok = JS(v, "token");
+                    if (tok != "") return new[] { fe + "/share?shareToken=" + Uri.EscapeDataString(tok), "external_link" };
+                }
+                catch (Exception ex) { if (Inner(ex).IndexOf("ACCESS_DENIED", StringComparison.OrdinalIgnoreCase) < 0) throw; }
+            }
+            return new[] { internalUrl, "circularo_login" };
+        }
+        private static void TtaMail(string session, string from, string to, string subject, string html)
+        {
+            var asm = typeof(TotalAgility.Sdk.UserService).Assembly;
+            var st = asm.GetType("TotalAgility.Sdk.ServerService", true);
+            var mi = st.GetMethod("SendEmail2");
+            var it = mi.GetParameters()[1].ParameterType;
+            var info = Activator.CreateInstance(it);
+            if (from != "") it.GetProperty("FromField").SetValue(info, from, null);
+            var tp = it.GetProperty("ToField"); var col = tp.GetValue(info, null) ?? Activator.CreateInstance(tp.PropertyType);
+            col.GetType().GetMethod("Add").Invoke(col, new object[] { to }); tp.SetValue(info, col, null);
+            it.GetProperty("Subject").SetValue(info, subject, null);
+            it.GetProperty("Body").SetValue(info, html, null);
+            it.GetProperty("Format").SetValue(info, (short)1, null);   // 1 = HTML
+            try { mi.Invoke(Activator.CreateInstance(st), new object[] { session, info }); }
+            catch (TargetInvocationException e) { throw new Exception("SendEmail2: " + Inner(e)); }
+        }
+        private static string Fill(string t, Dictionary<string, string> v) { foreach (var kv in v) t = t.Replace("{" + kv.Key + "}", kv.Value); return t; }
+        private static string HtmlEnc(string s) { return System.Net.WebUtility.HtmlEncode(s ?? ""); }
+        // Send one reminder email; returns "ok: <email>" or throws.
+        private static string RemindOne(object cfg, string conn, string key, string session, Dictionary<string, object> r, string actor, ref string dbg)
+        {
+            var rc = JO(cfg, "reminders");
+            var link = RecipientLink(cfg, key, r, JS(r, "circularo_document_id"), JS(r, "document_type"), ref dbg);
+            var dl = JS(r, "valid_until_utc"); DateTime dd; string deadline = DateTime.TryParse(dl, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out dd) ? dd.ToString("d MMM yyyy", CultureInfo.InvariantCulture) : "";
+            string sender = JS(r, "created_by_name"); int pi = sender.LastIndexOf(" ("); if (pi > 0) sender = sender.Substring(0, pi);
+            var v = new Dictionary<string, string>();
+            v["name"] = HtmlEnc(JS(r, "full_name") != "" ? JS(r, "full_name") : JS(r, "email")); v["title"] = HtmlEnc(JS(r, "title")); v["url"] = HtmlEnc(link[0]);
+            v["sender"] = HtmlEnc(sender == "" ? "CRO e-Signing" : sender); v["deadline"] = HtmlEnc(deadline);
+            v["action"] = HtmlEnc(JS(r, "share_purpose") == "approve" ? "approve" : JS(r, "share_purpose") == "review" ? "review" : JS(r, "share_purpose") == "accept" ? "accept" : "sign");
+            v["howto"] = link[1] == "external_link" ? "Circularo will email you a one-time code when you open the link." : "Sign in to Circularo with your account if asked.";
+            string subject = Fill(JS(rc, "subject") != "" ? JS(rc, "subject") : "Reminder: please {action} \"{title}\"", v).Replace("&quot;", "\"").Replace("&amp;", "&");
+            string body = Fill(JS(rc, "body") != "" ? JS(rc, "body") :
+                "<p>Dear {name},</p><p>{sender} is waiting for you to {action} <b>{title}</b>{deadline_text}.</p><p><a href=\"{url}\">Open the document in Circularo</a></p><p>{howto}</p><p style=\"color:#667085;font-size:12px\">Sent by CRO e-Signing (TotalAgility).</p>", v)
+                .Replace("{deadline_text}", deadline == "" ? "" : " by " + HtmlEnc(deadline));
+            TtaMail(session, JS(rc, "from"), JS(r, "email"), subject, body);
+            DbQuery(conn, "cro_api.reminder_mark", "@RecipientId", Convert.ToInt64(JN(r, "recipient_id")), "@Outcome", "ok", "@Detail", JS(r, "email") + " (" + link[1] + ")", "@Actor", actor);
+            return "ok: " + JS(r, "email");
+        }
+        private static string RemindersDue(object cfg, string conn, string key, string session, ref string dbg)
+        {
+            var rc = JO(cfg, "reminders");
+            if (JS(rc, "by") != "tta") return "off";
+            int sent = 0, failed = 0;
+            foreach (var ro in FirstSet(DbQuery(conn, "cro_api.reminders_due", "@FirstAfterHours", (int)(JN(rc, "firstAfterHours") > 0 ? JN(rc, "firstAfterHours") : 48),
+                     "@EveryHours", (int)(JN(rc, "everyHours") > 0 ? JN(rc, "everyHours") : 48), "@Max", (int)(JN(rc, "max") > 0 ? JN(rc, "max") : 5), "@Batch", 25)))
+            {
+                try { RemindOne(cfg, conn, key, session, ro as Dictionary<string, object>, "system", ref dbg); sent++; }
+                catch (Exception ex)
+                {
+                    failed++;
+                    try { DbQuery(conn, "cro_api.reminder_mark", "@RecipientId", Convert.ToInt64(JN(ro, "recipient_id")), "@Outcome", "error", "@Detail", Inner(ex).Length > 1900 ? Inner(ex).Substring(0, 1900) : Inner(ex), "@Actor", "system"); } catch (Exception) { }
+                }
+            }
+            return sent + " sent, " + failed + " failed";
+        }
+
         // ---- signing link for the caller (must be a recipient of the request) ----
         private static string SignUrl(object cfg, string conn, string key, string email, string resourceId, long requestId, ref string dbg)
         {
@@ -1448,7 +1527,7 @@ namespace Cro
                 if (InSafe(sp, "CRO_RUNMODE") == "signing") { Signing(sp, cfg, conn, ref dbg); return; }
                 if (InSafe(sp, "CRO_RUNMODE") == "sync")
                 {
-                    result = Sync(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), ref dbg);
+                    result = Sync(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
                     sp.OutputVariables["RESULT"] = result; sp.OutputVariables["ERROR"] = error; sp.OutputVariables["DEBUG"] = dbg;
                     return;
                 }
@@ -1476,7 +1555,7 @@ namespace Cro
                     {
                         var c = cfg as Dictionary<string, object>;
                         var safe = new Dictionary<string, object>();
-                        foreach (var k in new[] { "version", "circularo", "defaults", "options", "anchors", "adhoc", "groups", "layouts" })
+                        foreach (var k in new[] { "version", "circularo", "defaults", "options", "anchors", "adhoc", "groups", "layouts", "reminders" })
                             if (c.ContainsKey(k)) safe[k] = c[k];
                         result = JSer(safe);
                         break;
@@ -1620,7 +1699,7 @@ namespace Cro
                     }
                     case "sync_now":
                         if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
-                        result = Sync(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), ref dbg);
+                        result = Sync(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
                         break;
                     case "webhook_list":
                     {
@@ -1927,10 +2006,46 @@ namespace Cro
                         foreach (var ro in (got.Count > 1 ? got[1] as List<object> : new List<object>()))
                             if (JS(ro, "status") == "waiting" && JS(ro, "share_id") != "") { var x = new Dictionary<string, object>(); x["shareId"] = JS(ro, "share_id"); shares.Add(x); }
                         if (shares.Count == 0) throw new Exception("Nobody is waiting to act.");
+                        if (JS(JO(cfg, "reminders"), "by") == "tta")
+                        {
+                            // TotalAgility sends the email with the signing link (manual reminder: no schedule check)
+                            string key2 = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg); var outl = new List<object>();
+                            foreach (var ro in (got.Count > 1 ? got[1] as List<object> : new List<object>()))
+                            {
+                                if (JS(ro, "status") != "waiting" || JS(ro, "share_id") == "") continue;
+                                var r2 = new Dictionary<string, object>(ro as Dictionary<string, object>);
+                                foreach (var k in new[] { "title", "valid_until_utc", "created_by_name", "circularo_document_id", "document_type" }) r2[k] = JS(rq, k);
+                                try { outl.Add(RemindOne(cfg, conn, key2, In(sp, "SPP_SYSTEM_SESSION_ID"), r2, who[1] + " (" + who[0] + ")", ref dbg)); }
+                                catch (Exception ex) { outl.Add("failed: " + JS(ro, "email") + ": " + Inner(ex)); }
+                            }
+                            var rr = new Dictionary<string, object>(); rr["requestId"] = (double)rid; rr["by"] = "tta"; rr["reminded"] = (double)outl.FindAll(x => Convert.ToString(x).StartsWith("ok")).Count; rr["results"] = outl;
+                            result = JSer(rr);
+                            break;
+                        }
                         var body = new Dictionary<string, object>(); body["reminderType"] = "email"; body["shares"] = shares;   // shares and documentId are exclusive
                         Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "POST", "/share/reminder", body, ref dbg);
                         DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "reminder_sent", "@Outcome", "ok", "@RequestId", rid, "@Detail", shares.Count + " recipient(s)");
                         result = "{\"requestId\":" + rid + ",\"reminded\":" + shares.Count + "}";
+                        break;
+                    }
+                    case "recipient_links":
+                    {
+                        // ARGS: { requestId }  Creator or admin: the signing-page link of everyone whose turn it is (for TotalAgility emails / tasks).
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", rid)) as List<object>;
+                        var rq = FirstRow(JSer(got));
+                        if (rq == null) throw new Exception("Request not found.");
+                        if (!IsCreatorOrAdmin(cfg, rq, who[0])) throw new Exception("Only the person who created the request can do this.");
+                        string key = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg); var outl = new List<object>();
+                        foreach (var ro in (got.Count > 1 ? got[1] as List<object> : new List<object>()))
+                        {
+                            if (JS(ro, "status") != "waiting") continue;
+                            var l = RecipientLink(cfg, key, ro as Dictionary<string, object>, JS(rq, "circularo_document_id"), JS(rq, "document_type"), ref dbg);
+                            var e = new Dictionary<string, object>(); e["recipientId"] = JN(ro, "recipient_id"); e["email"] = JS(ro, "email"); e["name"] = JS(ro, "full_name"); e["url"] = l[0]; e["mode"] = l[1];
+                            outl.Add(e);
+                        }
+                        DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "recipient_links", "@Outcome", "ok", "@RequestId", rid, "@Detail", outl.Count + " link(s)");
+                        result = JSer(outl);
                         break;
                     }
                     case "user_list":
