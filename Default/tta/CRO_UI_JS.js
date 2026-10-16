@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.10.0';
+  var VERSION = 'cro-ui 0.11.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -85,45 +85,54 @@
 
   /* ---------- look ---------- */
   var STATE = {
-    draft: { label: 'Draft', c: '#98A2B3' }, sending: { label: 'Sending', c: '#7A5AF8' }, inprogress: { label: 'In progress', c: '#2E90FA' },
+    draft: { label: 'Draft', c: '#98A2B3' }, sending: { label: 'Sending', c: '#7000FF' }, inprogress: { label: 'In progress', c: '#22AFFF' },
     completed: { label: 'Completed', c: '#12B76A' }, rejected: { label: 'Rejected', c: '#F04438' }, expired: { label: 'Expired', c: '#F79009' },
     cancelled: { label: 'Cancelled', c: '#667085' }, failed: { label: 'Failed', c: '#B42318' }
   };
+  var SIG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 30"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#FF6D69"/><stop offset="1" stop-color="#FFC600"/></linearGradient></defs>' +
+    '<path d="M4 20 C 60 10, 120 26, 170 14 C 200 7, 214 12, 206 19 C 200 24, 232 14, 296 8" fill="none" stroke="url(%23g)" stroke-width="5" stroke-linecap="round"/></svg>').replace(/%2523/g, '%23');
   var CSS = [
-    ':root{--cro-ink:#101828;--cro-sub:#475467;--cro-mute:#667085;--cro-line:#EAECF0;--cro-bg:#F5F6FA;--cro-card:#fff;--cro-acc:#4E3FD8;--cro-acc2:#EEEBFF;--cro-ok:#12B76A;--cro-bad:#F04438;--cro-warn:#F79009}',
-    '.cro{font:14px/1.45 "Segoe UI",Arial,sans-serif;color:var(--cro-ink);background:var(--cro-bg);min-height:100vh;margin:0}',
+    ':root{--cro-ink:#1B1B2F;--cro-sub:#4A5265;--cro-mute:#667085;--cro-line:#E4E7EF;--cro-bg:#F6F7FB;--cro-card:#fff;--cro-acc:#0F0069;--cro-acc-h:#7000FF;--cro-acc2:#EFEAFF;--cro-navy:#002854;--cro-sky:#22AFFF;--cro-coral:#FF6D69;--cro-amber:#FFC600;--cro-ok:#12B76A;--cro-bad:#F04438;--cro-warn:#F79009;' +
+      '--cro-rh:"Red Hat Display","Segoe UI",system-ui,Arial,sans-serif;--cro-sp:"League Spartan","Red Hat Display",system-ui,Arial,sans-serif}',
+    '.cro{font:14px/1.5 var(--cro-rh);color:var(--cro-ink);background:var(--cro-bg);min-height:100vh;margin:0}',
     '.cro *{box-sizing:border-box}',
-    '.cro-top{display:flex;align-items:center;gap:24px;background:#fff;border-bottom:1px solid var(--cro-line);padding:0 28px;height:60px;position:sticky;top:0;z-index:5}',
-    '.cro-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;color:var(--cro-ink);text-decoration:none}',
-    '.cro-brand i{width:30px;height:30px;border-radius:8px;background:var(--cro-acc);display:grid;place-items:center;color:#fff;font-style:normal;font-size:15px}',
+    '.cro-top{display:flex;align-items:center;gap:24px;padding:0 28px;height:64px;position:sticky;top:0;z-index:5;color:#fff;' +
+      'background:linear-gradient(135deg,var(--cro-navy) 0,var(--cro-navy) 340px,var(--cro-acc) 340px,var(--cro-acc) 100%);box-shadow:0 2px 12px rgba(0,16,48,.18)}',
+    '.cro-brand{display:flex;align-items:center;gap:10px;font:800 19px/1 var(--cro-sp);letter-spacing:-.2px;color:#fff;text-decoration:none;white-space:nowrap}',
+    '.cro-brand i{width:30px;height:30px;border-radius:50%;background:var(--cro-acc-h);display:grid;place-items:center;flex:none;box-shadow:0 4px 12px rgba(112,0,255,.45)}',
     '.cro-nav{display:flex;gap:4px;flex:1}',
-    '.cro-nav a{padding:8px 12px;border-radius:8px;color:var(--cro-sub);text-decoration:none;font-weight:600}',
-    '.cro-nav a:hover{background:var(--cro-bg)}.cro-nav a.on{color:var(--cro-acc);background:var(--cro-acc2)}',
-    '.cro-me{color:var(--cro-sub);font-size:13px;white-space:nowrap}',
+    '.cro-nav a{position:relative;padding:8px 12px;color:rgba(255,255,255,.78);text-decoration:none;font-weight:500}',
+    '.cro-nav a:hover{color:#fff}.cro-nav a.on{color:#fff;font-weight:700}',
+    '.cro-nav a.on:after{content:"";position:absolute;left:12px;right:12px;bottom:-2px;height:3px;border-radius:2px;background:linear-gradient(90deg,var(--cro-coral),var(--cro-amber))}',
+    '.cro-nav a:focus-visible,.cro-brand:focus-visible,.cro-out:focus-visible{outline:2px solid var(--cro-amber);outline-offset:2px;border-radius:6px}',
+    '.cro-me{color:rgba(255,255,255,.8);font-size:13px;white-space:nowrap}',
     '.cro-main{max-width:1240px;margin:0 auto;padding:28px}',
     '.cro-h1{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 20px}',
-    '.cro-h1 h1{font-size:22px;margin:0}.cro-h1 .ctl{display:flex;gap:8px;align-items:center}',
+    '.cro-h1 h1{font:800 30px/1.1 var(--cro-sp);letter-spacing:-.3px;color:var(--cro-acc);margin:0;padding-bottom:16px;position:relative}.cro-h1 .ctl{display:flex;gap:8px;align-items:center}',
+    '.cro-h1 h1:after{content:"";position:absolute;left:-2px;bottom:0;width:132px;height:14px;background:url("' + SIG + '") no-repeat left center/contain;clip-path:inset(0 100% 0 0);animation:croSig .9s .15s cubic-bezier(.6,.1,.3,1) forwards}',
+    '@keyframes croSig{to{clip-path:inset(0 0 0 0)}}@media (prefers-reduced-motion:reduce){.cro-h1 h1:after{animation:none;clip-path:none}}',
     '.cro-seg{display:inline-flex;background:#fff;border:1px solid var(--cro-line);border-radius:8px;overflow:hidden}',
-    '.cro-seg button{border:0;background:none;padding:7px 12px;font:inherit;color:var(--cro-sub);cursor:pointer}',
+    '.cro-seg button{border:0;background:none;padding:7px 12px;font:inherit;font-weight:500;color:var(--cro-sub);cursor:pointer}',
     '.cro-seg button.on{background:var(--cro-acc);color:#fff}',
     '.cro-grid{display:grid;gap:16px}',
     '.cro-g3{grid-template-columns:repeat(3,1fr)}.cro-g5{grid-template-columns:repeat(5,1fr)}.cro-g21{grid-template-columns:2fr 1fr}.cro-g12{grid-template-columns:1fr 2fr}.cro-g11{grid-template-columns:1fr 1fr}',
     '@media(max-width:900px){.cro-g3,.cro-g5,.cro-g21,.cro-g12,.cro-g11{grid-template-columns:1fr}.cro-nav{display:none}}',
     '.cro-card{background:var(--cro-card);border:1px solid var(--cro-line);border-radius:12px;padding:20px;overflow-x:auto}',
-    '.cro-card h2{font-size:15px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center}',
+    '.cro-card h2{font:700 16px/1.3 var(--cro-rh);color:var(--cro-ink);margin:0 0 14px;display:flex;justify-content:space-between;align-items:center}',
     '.cro-card h2 small{font-weight:400;color:var(--cro-mute);font-size:12px}',
     '.cro-tile{display:flex;gap:16px;align-items:center;text-decoration:none;color:inherit;transition:transform .12s,box-shadow .12s}',
     '.cro-tile:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(16,24,40,.08)}',
-    '.cro-tile .ic{width:52px;height:52px;border-radius:50%;background:var(--cro-acc);display:grid;place-items:center;flex:none}',
-    '.cro-tile b{display:block;font-size:15px;letter-spacing:.02em}.cro-tile span{color:var(--cro-mute);font-size:13px}',
+    '.cro-tile .ic{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--cro-navy) 50%,var(--cro-acc) 50%);display:grid;place-items:center;flex:none}',
+    '.cro-tile:hover .ic{background:var(--cro-acc-h)}',
+    '.cro-tile b{display:block;font:700 16px/1.3 var(--cro-rh);color:var(--cro-acc)}.cro-tile span{color:var(--cro-mute);font-size:13px}',
     '.cro-stat{text-decoration:none;color:inherit;display:block;text-align:center}',
-    '.cro-stat .n{font-size:30px;font-weight:700;margin-top:4px}.cro-stat .l{color:var(--cro-sub);font-size:13px}',
-    '.cro-stat:hover{border-color:#C7C1FB}',
+    '.cro-stat .n{font:800 34px/1.1 var(--cro-sp);margin-top:6px}.cro-stat .l{color:var(--cro-sub);font-size:13px}',
+    '.cro-stat:hover{border-color:#CBB8FF}',
     '.cro-sec{margin:28px 0 12px;color:var(--cro-mute);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}',
     '.cro-legend{display:flex;flex-wrap:wrap;gap:10px 16px;font-size:12px;color:var(--cro-sub)}',
     '.cro-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}',
     '.cro-kv{display:grid;grid-template-columns:1fr auto;gap:8px 16px;font-size:13px}.cro-kv span{color:var(--cro-sub)}.cro-kv b{text-align:right}',
-    '.cro-big{font-size:34px;font-weight:700}.cro-big small{font-size:14px;color:var(--cro-mute);font-weight:400;margin-left:6px}',
+    '.cro-big{font:800 36px/1.1 var(--cro-sp)}.cro-big small{font-size:14px;color:var(--cro-mute);font-weight:400;margin-left:6px}',
     '.cro-bar{height:8px;border-radius:4px;background:var(--cro-line);overflow:hidden}.cro-bar i{display:block;height:100%;background:var(--cro-acc)}',
     '.cro-act{list-style:none;margin:0;padding:0}.cro-act li{padding:10px 0;border-bottom:1px solid var(--cro-line);font-size:13px;display:flex;gap:10px}',
     '.cro-act li:last-child{border-bottom:0}.cro-act .t{color:var(--cro-mute);min-width:110px}.cro-act a{color:var(--cro-ink);font-weight:600;text-decoration:none}.cro-act a:hover{color:var(--cro-acc)}',
@@ -140,19 +149,20 @@
     '.cro-lead{color:var(--cro-sub);margin:-12px 0 18px}',
     '.cro-f{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}.cro-f>label{font-size:12px;font-weight:600;color:var(--cro-sub)}',
     '.cro-in{font:inherit;padding:8px 10px;border:1px solid #D0D5DD;border-radius:8px;background:#fff;color:var(--cro-ink);width:100%;min-width:0}',
-    '.cro-in:focus{outline:2px solid var(--cro-acc2);border-color:var(--cro-acc)}.cro-in:disabled{background:var(--cro-bg);color:var(--cro-sub)}',
+    '.cro-in:focus{outline:0;border-color:var(--cro-acc);box-shadow:0 0 0 3px rgba(255,198,0,.45)}.cro-in:disabled{background:var(--cro-bg);color:var(--cro-sub)}',
     '.cro-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:2px dashed #D0D5DD;border-radius:12px;padding:26px;cursor:pointer;margin-bottom:14px;text-align:center}',
     '.cro-drop:hover,.cro-drop.over{border-color:var(--cro-acc);background:var(--cro-acc2)}.cro-drop span{color:var(--cro-mute);font-size:13px}',
     '.cro-radio{display:block;padding:4px 0;font-weight:400 !important;color:var(--cro-ink) !important;font-size:14px !important}.cro-radio.off{color:var(--cro-mute) !important}.cro-radio small{color:var(--cro-mute)}',
     '.cro-check{display:block;margin-bottom:10px;color:var(--cro-sub)}',
-    '.cro-note{background:var(--cro-acc2);color:#3B2DB0;border-radius:8px;padding:10px 12px;font-size:13px}',
-    '.cro-hint{font-size:11px;color:var(--cro-acc);margin-top:2px}.cro-ro{padding:8px 0;color:var(--cro-sub)}',
+    '.cro-note{background:var(--cro-acc2);color:var(--cro-acc);border-radius:8px;padding:10px 12px;font-size:13px}',
+    '.cro-hint{font-size:11px;color:var(--cro-acc-h);margin-top:2px}.cro-ro{padding:8px 0;color:var(--cro-sub)}',
     '.cro-rcp td{padding:6px 4px}.cro-x{border:0;background:none;font-size:20px;color:var(--cro-mute);cursor:pointer;padding:4px 8px}.cro-x:hover{color:var(--cro-bad)}',
     '.cro-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}',
     '.cro-btn,.cro-btn2{font:inherit;font-weight:600;border-radius:8px;padding:10px 18px;cursor:pointer;text-decoration:none;display:inline-block}',
-    '.cro-btn{background:var(--cro-acc);color:#fff;border:1px solid var(--cro-acc)}.cro-btn:disabled{opacity:.6;cursor:wait}',
+    '.cro-btn{background:var(--cro-acc);color:#fff;border:1px solid var(--cro-acc);transition:background .15s,border-color .15s}.cro-btn:hover{background:var(--cro-acc-h);border-color:var(--cro-acc-h)}.cro-btn:disabled{opacity:.6;cursor:wait}',
+    '.cro-btn:focus-visible,.cro-btn2:focus-visible,.cro-seg button:focus-visible,.cro-chips button:focus-visible{outline:3px solid var(--cro-amber);outline-offset:2px}',
     '.cro-btn2{background:#fff;color:var(--cro-ink);border:1px solid #D0D5DD}.cro-btn2:hover{background:var(--cro-bg)}',
-    '.cro-done{text-align:center;padding:40px}.cro-done .big{width:64px;height:64px;border-radius:50%;background:#D1FADF;color:#039855;font-size:32px;display:grid;place-items:center;margin:0 auto 12px}.cro-done h1{margin:0 0 6px;font-size:22px}',
+    '.cro-done{text-align:center;padding:40px}.cro-done .big{width:64px;height:64px;border-radius:50%;background:#D1FADF;color:#039855;font-size:32px;display:grid;place-items:center;margin:0 auto 12px}.cro-done h1{margin:0 0 6px;font:800 28px/1.15 var(--cro-sp);color:var(--cro-acc)}',
     '.cro-chips{display:flex;flex-wrap:wrap;gap:8px;margin:-4px 0 16px}.cro-chips button{font:inherit;font-size:13px;border:1px solid #D0D5DD;background:#fff;color:var(--cro-sub);border-radius:999px;padding:6px 12px;cursor:pointer}',
     '.cro-chips button.on{background:var(--cro-acc);border-color:var(--cro-acc);color:#fff}',
     '.cro-tools{display:flex;gap:10px;margin-bottom:12px}.cro-list td{vertical-align:middle}',
@@ -169,9 +179,9 @@
     '.cro-fld{position:absolute;border:2px dashed;border-radius:4px;font-size:11px;font-weight:600;cursor:move;display:flex;align-items:center;padding:0 4px;overflow:hidden;white-space:nowrap}',
     '.cro-fld b{margin-left:auto;cursor:pointer;font-size:14px;padding:0 2px}',
     '.cro-groups{margin-top:10px;display:flex;flex-direction:column;gap:6px;color:var(--cro-sub);font-size:13px}.cro-rights{margin-top:4px}',
-    '.cro-out{border:1px solid var(--cro-line);background:#fff;color:var(--cro-sub);border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer;margin-left:12px}.cro-out:hover{color:var(--cro-bad);border-color:#FDA29B}',
-    '.cro-foot{color:var(--cro-mute);font-size:12px;text-align:center;padding:24px}',
-    'svg text{font-family:"Segoe UI",Arial,sans-serif}'
+    '.cro-out{border:1px solid rgba(255,255,255,.35);background:transparent;color:#fff;border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;font-weight:500;cursor:pointer;margin-left:12px}.cro-out:hover{background:rgba(255,255,255,.12);border-color:#fff}',
+    '.cro-foot{color:var(--cro-mute);font-size:12px;padding:24px 28px;max-width:1240px;margin:0 auto;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}',
+    '.cro svg text{font-family:var(--cro-rh)}'
   ].join('\n');
   var ICON = {
     signNow: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M3 17c3-1 4-6 6-6s1 5 3 5 3-3 5-3 2 2 4 2"/><path d="M3 21h18"/></svg>',
@@ -192,6 +202,11 @@
   })();
   var root;
   var shell = function () {
+    if (!document.getElementById('croFonts')) {
+      var lk = document.createElement('link'); lk.id = 'croFonts'; lk.rel = 'stylesheet';
+      lk.href = 'https://fonts.googleapis.com/css2?family=League+Spartan:wght@600;700;800&family=Red+Hat+Display:wght@400;500;700&display=swap';
+      document.head.appendChild(lk);
+    }
     var st = document.createElement('style'); st.textContent = CSS; document.head.appendChild(st);
     // hide the TotalAgility form chrome; the marker cell becomes our root
     var marker = document.querySelector('[data-cro-page]');
@@ -199,15 +214,15 @@
     document.body.appendChild(root);
     try { Array.prototype.forEach.call(document.body.children, function (c) { if (c !== root && c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE' && !c.classList.contains('cro-toast')) c.style.display = 'none'; }); } catch (e) { }
     if (marker) marker.style.display = 'none';
-    document.body.style.margin = '0'; document.body.style.background = '#F5F6FA';
+    document.body.style.margin = '0'; document.body.style.background = '#F6F7FB';
     root.innerHTML =
-      '<div class="cro-top"><a class="cro-brand" href="' + link('dashboard') + '"><i>✓</i>CRO e-Signing</a>' +
+      '<div class="cro-top"><a class="cro-brand" href="' + link('dashboard') + '"><i><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i>CRO e-Signing</a>' +
       '<nav class="cro-nav">' +
       [['dashboard', 'Dashboard'], ['send', 'Send for signature'], ['requests', 'Requests'], ['users', 'Users']].map(function (p) {
         return '<a href="' + link(p[0]) + '"' + (page === p[0] || (page === 'request' && p[0] === 'requests') ? ' class="on"' : '') + '>' + p[1] + '</a>';
       }).join('') + '</nav><span class="cro-me" id="croMe"></span><button class="cro-out" id="croOut" title="Sign out">Sign out</button></div>' +
       '<div class="cro-main" id="croMain"><div class="cro-skel">Loading…</div></div>' +
-      '<div class="cro-foot">TotalAgility × Circularo · ' + VERSION + '</div>';
+      '<div class="cro-foot"><span>Tungsten TotalAgility and Circularo integration</span><span>Built by Sudocode Solutions, ' + VERSION + '</span></div>';
   };
   var LOGIN_URL = BASE + '/forms/cro';                         // friendly alias (IIS) for the CRO sign-in form
   var LOGIN_FORM = FORMS + 'CRO_Login.form';
@@ -251,7 +266,7 @@
     rows.forEach(function (r, i) {
       var x = L + i * step + step / 2, d = asDate(r.day);
       var lab = d ? d.getUTCDate() + ' ' + 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[d.getUTCMonth()] : '';
-      if (r.sent) g += '<rect x="' + (x - bw - 1) + '" y="' + y(r.sent) + '" width="' + bw + '" height="' + (H - B - y(r.sent)) + '" rx="2" fill="#4E3FD8"><title>' + esc(lab + ' sent: ' + r.sent) + '</title></rect>';
+      if (r.sent) g += '<rect x="' + (x - bw - 1) + '" y="' + y(r.sent) + '" width="' + bw + '" height="' + (H - B - y(r.sent)) + '" rx="2" fill="#7000FF"><title>' + esc(lab + ' sent: ' + r.sent) + '</title></rect>';
       if (r.completed) g += '<rect x="' + (x + 1) + '" y="' + y(r.completed) + '" width="' + bw + '" height="' + (H - B - y(r.completed)) + '" rx="2" fill="#12B76A"><title>' + esc(lab + ' completed: ' + r.completed) + '</title></rect>';
       var every = Math.ceil(n / 8);
       if ((n - 1 - i) % every === 0) g += '<text x="' + x + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="#667085">' + esc(lab) + '</text>';
@@ -298,7 +313,7 @@
         '<div class="cro-sec">Overview</div>' +
         '<div class="cro-grid cro-g5">' +
         stat(ov.assigned_to_me, 'Assigned to me', '#F79009', 'assigned') +
-        stat(ov.waiting_for_others, 'Waiting for others', '#4E3FD8', 'waiting') +
+        stat(ov.waiting_for_others, 'Waiting for others', '#7000FF', 'waiting') +
         stat(ov.completed, 'Completed', '#12B76A', 'completed') +
         stat(ov.approaching_deadline, 'Approaching deadline', '#D92D20', 'deadline') +
         stat(ov.needs_attention, 'Needs attention', '#B42318', 'attention') +
@@ -307,7 +322,7 @@
         '<div class="cro-grid cro-g12">' +
         '<div class="cro-card"><h2>Requests by status</h2><div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">' + donut(parts, total) +
         '<div class="cro-legend" style="flex-direction:column">' + parts.filter(function (p) { return p.v; }).map(function (p) { return '<span><i style="background:' + p.c + '"></i>' + p.label + ' · <b>' + p.v + '</b></span>'; }).join('') + '</div></div></div>' +
-        '<div class="cro-card"><h2>Volume over time <span class="cro-legend"><span><i style="background:#4E3FD8"></i>Sent</span><span><i style="background:#12B76A"></i>Completed</span></span></h2>' + volume(vol) + '</div>' +
+        '<div class="cro-card"><h2>Volume over time <span class="cro-legend"><span><i style="background:#7000FF"></i>Sent</span><span><i style="background:#12B76A"></i>Completed</span></span></h2>' + volume(vol) + '</div>' +
         '</div>' +
         '<div class="cro-grid cro-g11" style="margin-top:16px">' +
         '<div class="cro-card"><h2>Success &amp; turnaround</h2>' +
@@ -326,7 +341,7 @@
         '</div>' +
         '<div class="cro-sec">Recent activity</div>' +
         '<div class="cro-card">' + (act.length ? '<ul class="cro-act">' + act.map(function (a) {
-          var c = /signed|completed|stored/.test(a.what) ? '#12B76A' : /reject|fail|expire|cancel/.test(a.what) ? '#F04438' : '#4E3FD8';
+          var c = /signed|completed|stored/.test(a.what) ? '#12B76A' : /reject|fail|expire|cancel/.test(a.what) ? '#F04438' : '#7000FF';
           return '<li><span class="cro-dot" style="background:' + c + '"></span><span class="t" title="' + esc(when(a.at_utc)) + '">' + esc(ago(a.at_utc)) + '</span><span><a href="' + link('request', 'ref=' + encodeURIComponent(a.request_ref)) + '">' + esc(a.title) + '</a> ' + esc(a.what) + (a.who && !/^system$/i.test(a.who) ? ' by ' + esc(who(a.who)) : '') + '</span></li>';
         }).join('') + '</ul>' : '<div class="cro-empty">No activity yet.</div>') + '</div>' +
         (d.isAdmin ? '<div class="cro-sec">Integration health</div><div id="croHealth" class="cro-card"><div class="cro-skel">Checking…</div></div>' : '');
@@ -429,7 +444,7 @@
         });
       };
       var placing = function () { var lay = L[S.layout]; return !(lay && /^anchors/.test(lay.placement)) && S.adhocOption === 'tta_placer'; };
-      var COLORS = ['#4E3FD8', '#E8590C', '#0E9384', '#C11574', '#2E90FA', '#7A5AF8', '#B54708', '#039855'];
+      var COLORS = ['#7000FF', '#E8590C', '#0E9384', '#C11574', '#2E90FA', '#7A5AF8', '#B54708', '#039855'];
       var signers = function () { return S.rcps.map(function (x, i) { return { n: i + 1, x: x }; }).filter(function (o) { return ['sign', 'approve', 'accept'].indexOf(o.x.purpose) >= 0; }); };
       var placerHtml = function () {
         if (!placing()) return '';
@@ -842,7 +857,7 @@
                 return '<div class="cro-file"><div><b>' + esc({ signed: 'Signed document', audit: 'Audit trail', certificate: 'Certificate of fulfillment' }[o.kind] || o.kind) + '</b><div class="cro-sub">' + esc(Math.max(1, Math.round(o.size_bytes / 1024))) + ' KB' + (o.has_signature ? ' · digitally signed' : '') + '</div></div><button class="cro-btn2 cro-sm" data-dl="' + esc(o.kind) + '">Download</button></div>';
               }).join('') : '<div class="cro-empty">' + (R.state === 'completed' ? 'Not stored yet – the sync fetches them within a few minutes.' : 'Available when everyone has signed.') + '</div>') + '</div>' +
             '<div class="cro-card"><h2>History</h2><ul class="cro-act">' + (TL.length ? TL.map(function (t) {
-                var c = t.outcome === 'ok' ? (t.source === 'circularo' ? '#12B76A' : '#4E3FD8') : '#F04438';
+                var c = t.outcome === 'ok' ? (t.source === 'circularo' ? '#12B76A' : '#7000FF') : '#F04438';
                 var what = { output_saved: 'File stored', request_set_document: 'Uploaded to Circularo', request_set_shares: 'Shared with recipients', request_detail: 'Access refused', reminder_sent: 'Reminder sent', webhook_receive: 'Webhook received' }[t.what] || t.what;
                 if (t.what === 'output_saved' && t.detail) what += ' – ' + String(t.detail).split(/[;,]/)[0];
                 return '<li><span class="cro-dot" style="background:' + c + '"></span><span class="t" title="' + esc(when(t.at_utc)) + '">' + esc(ago(t.at_utc)) + '</span><span><b>' + esc(what) + '</b>' + (t.who ? ' · ' + esc(who(t.who)) : '') +
