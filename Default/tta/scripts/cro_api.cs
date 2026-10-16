@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.10.1";
+        private const string VERSION = "cro-api 0.11.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -422,6 +422,22 @@ namespace Cro
             var layout = JO(JO(cfg, "layouts"), JS(req, "layout_key"));
             var anchors = layout == null ? new List<object>() : (JL(layout, "anchors") ?? new List<object>());
             if (placement != "anchors") anchors = new List<object>();
+            // Ad hoc "tokens": {{sign:n}} in the document marks the field of recipient n (1-based, recipient order as listed).
+            bool tokens = placement == "adhoc" && JS(req, "adhoc_option") == "tokens";
+            if (tokens)
+            {
+                var tk = JO(JO(cfg, "adhoc"), "tokens");
+                anchors = new List<object>();
+                for (int ti = 1; ti <= rcps.Count; ti++)
+                {
+                    var ta = new Dictionary<string, object>();
+                    ta["id"] = "CRO_TOKEN_" + ti; ta["text"] = "{{sign:" + ti + "}}"; ta["type"] = "signature"; ta["role"] = "#tok" + ti;
+                    ta["allMatches"] = true;
+                    var off = JO(tk, "offset"); if (off == null) { off = new Dictionary<string, object>(); ((Dictionary<string, object>)off)["percentX"] = 0.0; ((Dictionary<string, object>)off)["percentY"] = -0.01; ((Dictionary<string, object>)off)["percentWidth"] = 0.22; ((Dictionary<string, object>)off)["percentHeight"] = 0.045; }
+                    ta["offset"] = off;
+                    anchors.Add(ta);
+                }
+            }
             if (file == null || file.Length == 0) throw new Exception("No file.");
             double maxMb = JN(cx, "maxUploadMB") > 0 ? JN(cx, "maxUploadMB") : 40;
             if (file.Length > maxMb * 1024 * 1024) throw new Exception("File is larger than " + maxMb + " MB.");
@@ -490,6 +506,7 @@ namespace Cro
                             if (string.Equals(JS(uo, "email"), to, StringComparison.OrdinalIgnoreCase) && JS(uo, "circularo_username") != "") to = JS(uo, "circularo_username");
                 }
                 shareTo[rid] = to;
+                if (tokens) { string tr = "#tok" + (shareTo.Count); if (!byRole.ContainsKey(tr)) byRole[tr] = new List<Dictionary<string, object>>(); byRole[tr].Add(r); }
                 string role = JS(r, "anchor_id");
                 if (role == "") role = "#" + rid;
                 if (!byRole.ContainsKey(role)) byRole[role] = new List<Dictionary<string, object>>();
@@ -538,7 +555,7 @@ namespace Cro
             // 4. ad hoc / fallback: default position on the last page for every signer without a field
             var dp = JO(JO(cfg, "adhoc"), "defaultPosition");
             int idx = 0;
-            string placementUsed = anchors.Count > 0 ? "anchors" : "adhoc";
+            string placementUsed = tokens ? "tokens" : anchors.Count > 0 ? "anchors" : "adhoc";
             foreach (var ro in rcps)
             {
                 var r = ro as Dictionary<string, object>;
@@ -559,7 +576,7 @@ namespace Cro
                 f["tooltip"] = "Signature";
                 sigFields.Add(f);
                 idx++;
-                placementUsed = anchors.Count > 0 ? "anchors+default" : "default_position";
+                placementUsed = tokens ? (covered.Count > 0 ? "tokens+default" : "default_position") : anchors.Count > 0 ? "anchors+default" : "default_position";
             }
 
             // 5. document

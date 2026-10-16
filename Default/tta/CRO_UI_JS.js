@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.4.1';
+  var VERSION = 'cro-ui 0.5.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -260,7 +260,7 @@
       });
       var finished = suc.finished || 0, rate = finished ? Math.round(100 * (suc.completed || 0) / finished) : null;
       var mixTotal = 0; mix.forEach(function (m) { mixTotal += m.requests; });
-      var MIXL = { anchors: 'Anchor text', default_position: 'Default position (ad hoc)', 'anchors+default': 'Anchors + default', adhoc: 'Ad hoc', coordinates: 'Coordinates', template: 'Circularo template', word_template: 'Word template', detect: 'Field detection' };
+      var MIXL = { anchors: 'Anchor text', default_position: 'Default position (ad hoc)', 'anchors+default': 'Anchors + default', adhoc: 'Ad hoc', coordinates: 'Coordinates', template: 'Circularo template', word_template: 'Word template', detect: 'Field detection', tokens: '{{sign:n}} tokens', 'tokens+default': 'Tokens + default' };
       var stat = function (n, label, colour, filter) {
         return '<a class="cro-card cro-stat" href="' + link('requests', 'filter=' + filter + (dash.scope === 'all' ? '&scope=all' : '')) + '"><div class="l">' + label + '</div><div class="n" style="color:' + colour + '">' + (n || 0) + '</div></a>';
       };
@@ -405,7 +405,7 @@
       var showOrder = function () { return S.sequential && mode !== 'signnow'; };
       var rowHtml = function (x, i) {
         var ext = x.kind === 'external', lock = x.me;
-        return '<tr data-i="' + i + '">' +
+        return '<tr data-i="' + i + '"><td class="cro-sub" title="Recipient number (for {{sign:n}} tokens)">' + (i + 1) + '</td>' +
           (showOrder() ? '<td><input class="cro-in" style="width:56px" type="number" min="1" max="20" data-k="order" value="' + esc(x.order) + '"></td>' : '') +
           '<td><input class="cro-in" data-k="fullName" placeholder="Full name" value="' + esc(x.fullName) + '"' + (lock ? ' disabled' : '') + '></td>' +
           '<td><input class="cro-in" data-k="email" list="croUsers" placeholder="name@company.com" value="' + esc(x.email) + '"' + (lock ? ' disabled' : '') + '>' + (lock ? '<div class="cro-hint">You</div>' : '') + '</td>' +
@@ -441,13 +441,13 @@
               ? '<div class="cro-note">Fields are placed by anchor text in the document. Choose which field each recipient gets in the table below.</div>'
               : '<div class="cro-f"><label>Ad hoc placement</label>' + (O.adhocOptions || ['default_position']).map(function (a) {
                   var lab = { default_position: 'Default position on the last page', circularo_editor: 'Place in Circularo\'s editor', tta_placer: 'Place in TotalAgility', detect: 'Detect signature lines', tokens: '{{sign:n}} tokens' }[a] || a;
-                  var ready = a === 'default_position';
+                  var ready = a === 'default_position' || a === 'tokens';
                   return '<label class="cro-radio' + (ready ? '' : ' off') + '"><input type="radio" name="croAdhoc" value="' + a + '"' + (S.adhocOption === a ? ' checked' : '') + (ready ? '' : ' disabled') + '> ' + esc(lab) + (ready ? '' : ' <small>not built yet</small>') + '</label>';
-                }).join('') + '</div>') +
+                }).join('') + (S.adhocOption === 'tokens' ? '<div class="cro-note" style="margin-top:8px">Put <b>{{sign:1}}</b>, <b>{{sign:2}}</b> … in the document where each recipient signs (number = row in the recipients table). Recipients without a token get the default position.</div>' : '') + '</div>') +
           '</div></div>' +
           '<div class="cro-card" style="margin-top:16px"><h2>3. Recipients <small>' + (mode === 'signnow' ? 'just you' : S.rcps.length + ' of up to 100') + '</small></h2>' +
             (mode !== 'signnow' ? '<label class="cro-check"><input type="checkbox" id="croSeq"' + (S.sequential ? ' checked' : '') + '> Signing order (same number = sign in parallel)</label>' : '') +
-            '<table class="cro-table cro-rcp"><tr>' + (showOrder() ? '<th>Order</th>' : '') + '<th>Name</th><th>Email</th><th>Type</th><th>Action</th><th>Security</th>' + (lay ? '<th>Field</th>' : '') + '<th></th></tr>' +
+            '<table class="cro-table cro-rcp"><tr><th>#</th>' + (showOrder() ? '<th>Order</th>' : '') + '<th>Name</th><th>Email</th><th>Type</th><th>Action</th><th>Security</th>' + (lay ? '<th>Field</th>' : '') + '<th></th></tr>' +
             S.rcps.map(rowHtml).join('') + '</table>' +
             '<datalist id="croUsers">' + USERS.map(function (u) { return '<option value="' + esc(u.email) + '">' + esc(u.full_name) + '</option>'; }).join('') + '</datalist>' +
             (mode !== 'signnow' ? '<div style="margin-top:12px;display:flex;gap:8px"><button class="cro-btn2" id="croAdd">+ Add recipient</button>' + (mode === 'theysign' && !S.rcps.some(function (x) { return x.me; }) ? '<button class="cro-btn2" id="croAddMe">+ Add me</button>' : '') + '</div>' : '') +
@@ -480,7 +480,7 @@
         drop.ondrop = function (e) { e.preventDefault(); drop.classList.remove('over'); setFile(e.dataTransfer.files[0]); };
         document.getElementById('croTitle').oninput = function (e) { S.title = e.target.value; };
         document.getElementById('croLayout').onchange = function (e) { S.layout = e.target.value; resetRcps(); draw(); };
-        main().querySelectorAll('input[name=croAdhoc]').forEach(function (r) { r.onchange = function () { S.adhocOption = r.value; }; });
+        main().querySelectorAll('input[name=croAdhoc]').forEach(function (r) { r.onchange = function () { S.adhocOption = r.value; draw(); }; });
         var seq = document.getElementById('croSeq'); if (seq) seq.onchange = function () { S.sequential = seq.checked; draw(); };
         document.getElementById('croDeadline').onchange = function (e) { S.deadline = e.target.value; };
         main().querySelectorAll('.cro-rcp [data-k]').forEach(function (el) {
@@ -553,7 +553,7 @@
           '<div class="cro-card cro-done"><div class="big">✓</div><h1>' + (mode === 'signnow' ? 'Ready to sign' : 'Sent for signature') + '</h1>' +
           '<p><b>' + esc(d.title) + '</b> · request ' + esc(d.req.request_id) + '</p>' +
           '<div class="cro-kv" style="max-width:460px;margin:16px auto;text-align:left">' +
-            '<span>Signature fields</span><b>' + esc(r.fields) + ' (' + esc({ anchors: 'anchor text', adhoc: 'ad hoc', 'anchors+default': 'anchors + default position', default_position: 'default position' }[r.placementUsed] || r.placementUsed) + ')</b>' +
+            '<span>Signature fields</span><b>' + esc(r.fields) + ' (' + esc({ anchors: 'anchor text', adhoc: 'ad hoc', 'anchors+default': 'anchors + default position', default_position: 'default position', tokens: '{{sign:n}} tokens', 'tokens+default': 'tokens + default position' }[r.placementUsed] || r.placementUsed) + ')</b>' +
             '<span>Pages</span><b>' + esc(r.pages) + '</b>' +
             '<span>Signing order</span><b>' + (r.sequential ? 'In order' : 'All at once') + '</b>' +
             '<span>Recipients</span><b>' + esc((r.shares || []).length) + '</b></div>' +
