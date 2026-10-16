@@ -13,7 +13,7 @@
   };
   var T = {
     title: 'CRO e-Signing',
-    headline: 'Signed in Circularo. Filed in TotalAgility.',
+    headline: ['Signed in Circularo.', 'Filed in TotalAgility.'],
     sub: 'Send documents for signature from your TotalAgility work, follow every signer, and get the signed copy, audit trail and certificate back automatically.',
     steps: ['Prepared in TotalAgility', 'Signed in Circularo', 'Filed back in TotalAgility'],
     signIn: 'Sign in', signInSub: 'Use your TotalAgility account.',
@@ -38,6 +38,8 @@
   var SPLIT = 'min(56vw, 860px)';
   var css = [
     'html,body{background:#fff !important}',
+    'body.cro-login:not(.cro-ready) #wrapper{opacity:0}',
+    '#wrapper{transition:opacity .2s}',
     // art panel: Tungsten navy and Circularo indigo meeting on a 135-degree seam
     '#croArt{position:fixed;left:0;top:0;bottom:0;width:' + SPLIT + ';z-index:5;overflow:hidden;color:#fff;font-family:' + RH + ';' +
       'background:linear-gradient(135deg,' + C.navy + ' 0%,' + C.navy + ' 52%,' + C.indigo + ' 52%,' + C.indigo + ' 100%)}',
@@ -45,7 +47,8 @@
       'background:linear-gradient(90deg,transparent,' + C.sky + ' 30%,' + C.sky + ' 70%,transparent);opacity:.55}',
     '#croArt .in{position:relative;height:100%;box-sizing:border-box;padding:56px clamp(32px,5vw,72px) 32px;display:flex;flex-direction:column}',
     '#croArt .name{font:700 15px ' + RH + ';letter-spacing:.2px;opacity:.85}',
-    '#croArt h1{font:800 clamp(34px,3.6vw,54px)/1.04 ' + SP + ';letter-spacing:-.5px;margin:22px 0 18px;max-width:14ch}',
+    '#croArt h1{font:800 clamp(30px,3.4vw,54px)/1.06 ' + SP + ';letter-spacing:-.5px;margin:22px 0 18px}',
+    '#croArt h1 span{display:block;white-space:nowrap}',
     '#croArt p.sub{font:400 17px/1.55 ' + RH + ';color:rgba(255,255,255,.82);max-width:44ch;margin:0}',
     '#croArt .stage{flex:1;position:relative;min-height:220px}',
     // the document on the seam
@@ -63,11 +66,11 @@
     '@keyframes croDraw{to{stroke-dashoffset:0}}@keyframes croSeal{to{transform:scale(1)}}',
     '@media (prefers-reduced-motion:reduce){#croDoc svg.pen path{animation:none;stroke-dashoffset:0}#croSeal{animation:none;transform:none}}',
     // the three-step journey (a real sequence)
-    '#croArt ol{list-style:none;margin:0;padding:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font:500 14px ' + RH + '}',
-    '#croArt ol li{display:flex;align-items:center;gap:10px;color:rgba(255,255,255,.9)}',
+    '#croArt ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px;font:500 14px ' + RH + '}',
+    '#croArt ol li{display:flex;align-items:center;gap:12px;color:rgba(255,255,255,.9);position:relative}',
     '#croArt ol li b{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font:700 12px ' + RH + ';color:' + C.navy + ';background:#fff}',
     '#croArt ol li.c b{background:' + C.violet + ';color:#fff}',
-    '#croArt ol li + li:before{content:"";width:28px;height:2px;background:linear-gradient(90deg,' + C.coral + ',' + C.amber + ');margin-right:2px}',
+    '#croArt ol li + li:before{content:"";position:absolute;left:11px;top:-14px;width:2px;height:14px;background:linear-gradient(180deg,' + C.coral + ',' + C.amber + ')}',
     // right side: logos, title, native controls
     '#croSide{position:fixed;left:' + SPLIT + ';right:0;top:0;z-index:4;padding:36px 40px 0;box-sizing:border-box;display:flex;align-items:center;gap:14px;font:500 13px ' + RH + ';color:' + C.mute + '}',
     '#croSide img{display:block;height:30px;width:auto}#croSide img.c{height:24px}#croSide span{font:400 18px ' + RH + ';color:#A3ABBA}',
@@ -75,7 +78,7 @@
     '#croHead h2{font:800 34px/1.1 ' + SP + ';color:' + C.indigo + ';margin:0 0 6px;letter-spacing:-.3px}',
     '#croHead p{margin:0;font:400 15px ' + RH + ';color:' + C.mute + '}',
     '#croFoot{position:fixed;left:' + SPLIT + ';right:0;bottom:0;z-index:6;padding:16px 40px;display:flex;align-items:center;justify-content:space-between;gap:12px;font:400 12.5px ' + RH + ';color:' + C.mute + ';background:#fff}',
-    '#croFoot img{height:26px;width:auto;display:block}#croFoot a{display:flex;align-items:center;gap:8px;color:' + C.mute + ';text-decoration:none}',
+    '#croFoot img{height:26px;width:auto;display:block}#croFoot a{display:flex;align-items:center;gap:8px;white-space:nowrap;flex:none;color:' + C.mute + ';text-decoration:none}',
     '#wrapper .x-panel,#wrapper .x-panel-body,#wrapper .x-panel-bodyWrap,#wrapper .x-autocontainer-outerCt{background:transparent !important;border-color:transparent !important}',
     'html body #wrapper .kta-textbox .x-form-text-wrap{box-sizing:border-box !important;border:1.5px solid #C7CCD8 !important;border-radius:8px !important;background:#fff !important;transition:border-color .15s,box-shadow .15s}',
     'html body #wrapper .kta-textbox .x-form-trigger-wrap{border:0 !important;background:transparent !important}',
@@ -96,9 +99,9 @@
 
   // signature path: a loose hand-written flourish
   var pen = '<svg class="pen" viewBox="0 0 300 84" preserveAspectRatio="none"><defs><linearGradient id="croInk" x1="0" x2="1"><stop offset="0" stop-color="' + C.coral + '"/><stop offset="1" stop-color="' + C.amber + '"/></linearGradient></defs>' +
-    '<path d="M8 58 C 22 20, 34 18, 30 52 S 46 70, 58 40 C 64 26, 70 30, 68 50 C 66 66, 80 62, 88 44 C 94 30, 102 34, 100 52 C 99 62, 110 60, 118 46 L 126 34 C 128 50, 132 60, 146 50 C 164 36, 176 48, 168 58 C 160 66, 190 52, 210 40 C 228 30, 236 44, 226 54 C 220 60, 250 50, 292 30"/></svg>';
+    '<path d="M14 60 C 10 30, 30 6, 44 14 C 58 22, 40 58, 26 66 C 18 70, 22 52, 40 46 C 52 42, 58 48, 60 56 C 62 44, 68 38, 74 44 C 78 50, 76 58, 84 54 C 92 48, 96 22, 104 18 C 110 16, 106 44, 104 60 C 112 46, 120 40, 126 48 C 130 54, 136 56, 142 48 C 148 40, 156 40, 156 50 C 156 58, 166 58, 176 48 C 186 38, 194 42, 192 52 C 190 60, 204 58, 214 50 M 30 76 C 90 70, 190 66, 290 54"/></svg>';
   var art = document.createElement('div'); art.id = 'croArt';
-  art.innerHTML = '<div class="in"><div class="name">' + esc(T.title) + '</div><h1>' + esc(T.headline) + '</h1><p class="sub">' + esc(T.sub) + '</p>' +
+  art.innerHTML = '<div class="in"><div class="name">' + esc(T.title) + '</div><h1>' + T.headline.map(function (l) { return '<span>' + esc(l) + '</span>'; }).join('') + '</h1><p class="sub">' + esc(T.sub) + '</p>' +
     '<div class="stage"><div id="croDoc"><i class="t"></i><i style="width:92%"></i><i style="width:84%"></i><i style="width:88%"></i><i style="width:64%"></i><i style="width:78%"></i>' +
     '<div class="sig">' + pen + '<small>Signature</small></div>' +
     '<div id="croSeal" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div></div></div>' +
@@ -114,14 +117,27 @@
 
   // Layout: pin TotalAgility's form wrapper to the right-hand side and let Ext re-measure, so the native
   // logon controls reflow in place; hide TotalAgility's own title and put ours above the fields.
+  var topOffset = null;
   var layout = function () {
     var w = document.getElementById('wrapper'), mc = window.Ext && Ext.getCmp('_mainContainer');
     var user = document.querySelector('input[type=text].x-form-field, input:not([type]).x-form-field');
     var pass = document.querySelector('input[type=password]'), btn = document.querySelector('a.kta-button');
     if (!w || !mc || !user || !pass || !btn) return false;
     var left = window.innerWidth > 860 ? Math.min(window.innerWidth * 0.56, 860) : 0;
-    w.style.cssText = 'position:fixed;left:' + left + 'px;right:0;top:96px;bottom:60px;overflow:auto;z-index:2;background:transparent';
-    mc.setSize(w.clientWidth, w.clientHeight); mc.updateLayout();
+    var top = 96;
+    if (topOffset != null) top = Math.max(96 + 110 - topOffset, Math.round(window.innerHeight * 0.44) - topOffset - 60);
+    w.style.cssText = 'position:fixed;left:' + left + 'px;right:0;top:' + top + 'px;bottom:60px;overflow:auto;z-index:2;background:transparent';
+    mc.setSize(w.clientWidth, w.clientHeight);
+    // TotalAgility centres the controls in a 25/50/25 column row; make the middle column a comfortable width
+    var cw = Math.min(0.9, Math.min(360, w.clientWidth - 48) / Math.max(1, w.clientWidth));
+    [user, pass, btn].forEach(function (el) {
+      var n = el.parentElement, c = null;
+      while (n && n !== w) { c = n.id && Ext.getCmp(n.id); if (c && c.ownerCt && c.ownerCt.layout && c.ownerCt.layout.type === 'column' && c.ownerCt.items.length === 3) break; c = null; n = n.parentElement; }
+      if (!c) return;
+      var it = c.ownerCt.items.items, side = (1 - cw) / 2;
+      if (Math.abs((it[1].columnWidth || 0) - cw) > 0.001) { it[0].columnWidth = side; it[1].columnWidth = cw; it[2].columnWidth = side; }
+    });
+    mc.updateLayout();
     user.placeholder = 'Username'; pass.placeholder = 'Password';
     user.setAttribute('autocomplete', 'username'); pass.setAttribute('autocomplete', 'current-password');
     [].slice.call(document.querySelectorAll('#wrapper img')).forEach(function (i) { i.style.display = 'none'; });
@@ -133,10 +149,12 @@
     btn.style.transform = ''; btn.style.transform = 'translateX(' + Math.round(user.getBoundingClientRect().left - btn.getBoundingClientRect().left) + 'px)';
     var u = user.closest('.x-field').getBoundingClientRect();
     head.style.left = u.left + 'px'; head.style.width = fw + 'px'; head.style.top = Math.max(110, u.top - head.offsetHeight - 26) + 'px';
+    if (topOffset == null) { topOffset = Math.round(u.top - w.getBoundingClientRect().top); return layout(); }
+    document.body.classList.add('cro-ready');
     return true;
   };
   var tries = 0;
-  (function wait() { if (!layout() && tries++ < 60) setTimeout(wait, 150); else setTimeout(layout, 500); })();
+  (function wait() { if (!layout() && tries++ < 60) setTimeout(wait, 150); else { document.body.classList.add('cro-ready'); setTimeout(layout, 500); } })();
   var onResize = function () { setTimeout(layout, 60); };
   window.addEventListener('resize', onResize);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { setTimeout(layout, 50); });
@@ -151,7 +169,7 @@
     clearInterval(watch);
     [st, art, side, head, foot].forEach(function (e) { if (e && e.parentNode) e.parentNode.removeChild(e); });
     window.removeEventListener('resize', onResize); document.removeEventListener('keydown', onKey);
-    document.body.classList.remove('cro-login');
+    document.body.classList.remove('cro-login', 'cro-ready');
     var w = document.getElementById('wrapper'); if (w) w.style.cssText = '';
     try { var mc = window.Ext && Ext.getCmp('_mainContainer'); if (mc) { mc.setSize(window.innerWidth, window.innerHeight); mc.updateLayout(); } } catch (e) { }
   }, 200);
