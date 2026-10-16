@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.15.0";
+        private const string VERSION = "cro-api 0.15.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1372,7 +1372,18 @@ namespace Cro
             {
                 string sid = JS(me, "share_id");
                 if (sid == "") throw new Exception("This recipient has no Circularo share id yet.");
-                var v = Cx(cfg, key, "GET", "/share/" + Uri.EscapeDataString(sid) + "/validate", null, ref dbg);
+                object v;
+                try { v = Cx(cfg, key, "GET", "/share/" + Uri.EscapeDataString(sid) + "/validate", null, ref dbg); }
+                catch (Exception ex)
+                {
+                    // Circularo turns an email that belongs to an internal account into that account, so the share is not external after all
+                    if (Inner(ex).IndexOf("ACCESS_DENIED", StringComparison.OrdinalIgnoreCase) < 0) throw;
+                    res["mode"] = "circularo_login";
+                    res["url"] = fe + "/#!/sign?documentId=" + Uri.EscapeDataString(docId) + "&documentType=" + Uri.EscapeDataString(docType);
+                    res["note"] = "This email belongs to a Circularo account, so Circularo treats it as internal: sign in to Circularo if asked.";
+                    DbQuery(conn, "cro_api.audit_write", "@Actor", email + " (" + resourceId + ")", "@Action", "sign_url", "@Outcome", "ok", "@RequestId", requestId, "@Detail", "external share resolved to internal account");
+                    return JSer(res);
+                }
                 string tok = JS(v, "shareToken"); if (tok == "") tok = JS(v, "token"); if (tok == "") tok = JS(JO(v, "share"), "shareToken");
                 if (tok == "") { string t = JSer(v); dbg += "validate: " + (t.Length > 400 ? t.Substring(0, 400) : t) + " "; throw new Exception("Circularo did not return a share token."); }
                 res["mode"] = "external_link";
@@ -1882,7 +1893,7 @@ namespace Cro
                         foreach (var ro in (got.Count > 1 ? got[1] as List<object> : new List<object>()))
                             if (JS(ro, "status") == "waiting" && JS(ro, "share_id") != "") { var x = new Dictionary<string, object>(); x["shareId"] = JS(ro, "share_id"); shares.Add(x); }
                         if (shares.Count == 0) throw new Exception("Nobody is waiting to act.");
-                        var body = new Dictionary<string, object>(); body["documentId"] = JS(rq, "circularo_document_id"); body["reminderType"] = "email"; body["shares"] = shares;
+                        var body = new Dictionary<string, object>(); body["reminderType"] = "email"; body["shares"] = shares;   // shares and documentId are exclusive
                         Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "POST", "/share/reminder", body, ref dbg);
                         DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "reminder_sent", "@Outcome", "ok", "@RequestId", rid, "@Detail", shares.Count + " recipient(s)");
                         result = "{\"requestId\":" + rid + ",\"reminded\":" + shares.Count + "}";
