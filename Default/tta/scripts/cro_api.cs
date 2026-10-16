@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.18.0";
+        private const string VERSION = "cro-api 0.18.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1394,7 +1394,13 @@ namespace Cro
                     string tok = JS(v, "shareToken"); if (tok == "") tok = JS(v, "token");
                     if (tok != "") return new[] { fe + "/share?shareToken=" + Uri.EscapeDataString(tok), "external_link" };
                 }
-                catch (Exception ex) { if (Inner(ex).IndexOf("ACCESS_DENIED", StringComparison.OrdinalIgnoreCase) < 0) throw; }
+                catch (Exception ex)
+                {
+                    string m = Inner(ex);
+                    // a real external share cannot be validated with the API key ("Share is for external user!", 409): its link exists only in Circularo's email
+                    if (m.IndexOf("external user", StringComparison.OrdinalIgnoreCase) >= 0) return new[] { "", "external_email_only" };
+                    if (m.IndexOf("ACCESS_DENIED", StringComparison.OrdinalIgnoreCase) < 0) throw;
+                }
             }
             return new[] { internalUrl, "circularo_login" };
         }
@@ -1421,6 +1427,15 @@ namespace Cro
         {
             var rc = JO(cfg, "reminders");
             var link = RecipientLink(cfg, key, r, JS(r, "circularo_document_id"), JS(r, "document_type"), ref dbg);
+            if (link[1] == "external_email_only")
+            {
+                // no direct link for external signers: ask Circularo to resend its own email (it carries the personal link)
+                var rb = new Dictionary<string, object>(); rb["reminderType"] = "email";
+                var one = new Dictionary<string, object>(); one["shareId"] = JS(r, "share_id"); rb["shares"] = new List<object> { one };
+                Cx(cfg, key, "POST", "/share/reminder", rb, ref dbg);
+                DbQuery(conn, "cro_api.reminder_mark", "@RecipientId", Convert.ToInt64(JN(r, "recipient_id")), "@Outcome", "ok", "@Detail", JS(r, "email") + " (external: Circularo reminder email)", "@Actor", actor);
+                return "ok: " + JS(r, "email") + " (via Circularo)";
+            }
             var dl = JS(r, "valid_until_utc"); DateTime dd; string deadline = DateTime.TryParse(dl, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out dd) ? dd.ToString("d MMM yyyy", CultureInfo.InvariantCulture) : "";
             string sender = JS(r, "created_by_name"); int pi = sender.LastIndexOf(" ("); if (pi > 0) sender = sender.Substring(0, pi);
             var v = new Dictionary<string, string>();
@@ -1491,6 +1506,7 @@ namespace Cro
                 catch (Exception ex)
                 {
                     // Circularo turns an email that belongs to an internal account into that account, so the share is not external after all
+                    if (Inner(ex).IndexOf("external user", StringComparison.OrdinalIgnoreCase) >= 0) throw new Exception("Circularo only gives external signers their link by email: use the link in the Circularo email.");
                     if (Inner(ex).IndexOf("ACCESS_DENIED", StringComparison.OrdinalIgnoreCase) < 0) throw;
                     res["mode"] = "circularo_login";
                     res["url"] = fe + "/#!/sign?documentId=" + Uri.EscapeDataString(docId) + "&documentType=" + Uri.EscapeDataString(docType);
