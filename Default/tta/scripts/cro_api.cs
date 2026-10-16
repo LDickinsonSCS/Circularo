@@ -1428,9 +1428,10 @@ namespace Cro
             v["sender"] = HtmlEnc(sender == "" ? "CRO e-Signing" : sender); v["deadline"] = HtmlEnc(deadline);
             v["action"] = HtmlEnc(JS(r, "share_purpose") == "approve" ? "approve" : JS(r, "share_purpose") == "review" ? "review" : JS(r, "share_purpose") == "accept" ? "accept" : "sign");
             v["howto"] = link[1] == "external_link" ? "Circularo will email you a one-time code when you open the link." : "Sign in to Circularo with your account if asked.";
-            string subject = Fill(JS(rc, "subject") != "" ? JS(rc, "subject") : "Reminder: please {action} \"{title}\"", v).Replace("&quot;", "\"").Replace("&amp;", "&");
+            string q = ((char)34).ToString();
+            string subject = Fill(JS(rc, "subject") != "" ? JS(rc, "subject") : "Reminder: please {action} " + q + "{title}" + q, v).Replace("&quot;", q).Replace("&#39;", "'").Replace("&amp;", "&");
             string body = Fill(JS(rc, "body") != "" ? JS(rc, "body") :
-                "<p>Dear {name},</p><p>{sender} is waiting for you to {action} <b>{title}</b>{deadline_text}.</p><p><a href=\"{url}\">Open the document in Circularo</a></p><p>{howto}</p><p style=\"color:#667085;font-size:12px\">Sent by CRO e-Signing (TotalAgility).</p>", v)
+                "<p>Dear {name},</p><p>{sender} is waiting for you to {action} <b>{title}</b>{deadline_text}.</p><p><a href='{url}'>Open the document in Circularo</a></p><p>{howto}</p><p style='color:#667085;font-size:12px'>Sent by CRO e-Signing (TotalAgility).</p>", v)
                 .Replace("{deadline_text}", deadline == "" ? "" : " by " + HtmlEnc(deadline));
             TtaMail(session, JS(rc, "from"), JS(r, "email"), subject, body);
             DbQuery(conn, "cro_api.reminder_mark", "@RecipientId", Convert.ToInt64(JN(r, "recipient_id")), "@Outcome", "ok", "@Detail", JS(r, "email") + " (" + link[1] + ")", "@Actor", actor);
