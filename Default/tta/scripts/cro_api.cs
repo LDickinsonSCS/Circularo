@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.14.0";
+        private const string VERSION = "cro-api 0.15.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -408,7 +408,7 @@ namespace Cro
         }
 
         // ---- send a draft request: upload (+anchors) -> document -> share ----
-        private static string SendRequest(object cfg, string conn, string key, string actor, long requestId, string fileName, byte[] file, List<object> placed, ref string dbg)
+        private static string SendRequest(object cfg, string conn, string key, string actor, long requestId, string fileName, byte[] file, List<object> placed, object opts, ref string dbg)
         {
             var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId)) as List<object>;
             var reqRows = got != null && got.Count > 0 ? got[0] as List<object> : null;
@@ -694,10 +694,22 @@ namespace Cro
                     d["sharePurpose"] = JS(r, "share_purpose");
                     d["shareTo"] = shareTo[rid];
                     d["validUntil"] = validUntil;
-                    if (sequential) d["order"] = JN(r, "sign_order");
+                    if (sequential || JN(JO(opts, "quorum"), JS(r, "sign_order")) > 0) d["order"] = JN(r, "sign_order");
                     string prot = JS(r, "protection");
                     bool isExt = JS(r, "kind") == "external" || JS(r, "internal_mode") == "as_external";
                     if (isExt && prot == "email_otp") { d["otpEnabled"] = true; d["mail"] = JS(r, "email"); }
+                    // options (not stored): password per recipient number, signing-group quorum per order, rights, message
+                    int rno = byInsert.IndexOf(rid) + 1;
+                    if (isExt && prot == "password")
+                    {
+                        string pw = JS(JO(opts, "passwords"), rno.ToString(CultureInfo.InvariantCulture));
+                        if (pw.Length < 6) throw new Exception("Recipient " + rno + " is password-protected but has no password of at least 6 characters.");
+                        d["password"] = pw;
+                    }
+                    double qn = JN(JO(opts, "quorum"), JS(r, "sign_order"));
+                    if (qn > 0) d["quorum"] = qn;
+                    var rights = JL(opts, "rights"); if (rights != null) d["rights"] = rights;
+                    if (JS(opts, "message") != "") d["message"] = JS(opts, "message").Length > 1000 ? JS(opts, "message").Substring(0, 1000) : JS(opts, "message");
                     if (rem != null && JN(rem, "intervalDays") > 0)
                     {
                         var ar = new Dictionary<string, object>();
@@ -1196,7 +1208,7 @@ namespace Cro
                     if (senderName == "") senderName = "CRO Signing";
                     var created = FirstRow(DbQuery(conn, "cro_api.request_create", "@ActorId", Nz(senderId.Length == 32 ? senderId : ""), "@ActorName", senderName, "@Json", JSer(req)));
                     rid = Convert.ToInt64(JN(created, "request_id"));
-                    result = SendRequest(cfg, conn, key, actor, rid, (string)src[0], (byte[])src[1], JL(req, "fields"), ref dbg);
+                    result = SendRequest(cfg, conn, key, actor, rid, (string)src[0], (byte[])src[1], JL(req, "fields"), JO(req, "options"), ref dbg);
                     state = "inprogress";
                 }
                 else
@@ -1507,7 +1519,7 @@ namespace Cro
                         }
                         string fn = Arg(a, "fileName", 200); if (fn == "") fn = "document.pdf";
                         byte[] bytes = Convert.FromBase64String(JS(a, "fileB64"));
-                        result = SendRequest(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), who[1] + " (" + who[0] + ")", rid, fn, bytes, JL(a, "fields"), ref dbg);
+                        result = SendRequest(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), who[1] + " (" + who[0] + ")", rid, fn, bytes, JL(a, "fields"), JO(a, "options"), ref dbg);
                         break;
                     }
                     case "request_refresh":
@@ -1855,6 +1867,25 @@ namespace Cro
                         int got = ImportShares(cfg, conn, key, rid, ref dbg);
                         if (got > 0) RefreshRequest(cfg, conn, key, rid, "poll", ref dbg);
                         result = "{\"requestId\":" + rid + ",\"imported\":" + got + "}";
+                        break;
+                    }
+                    case "request_remind":
+                    {
+                        // ARGS: { requestId }  Creator or admin. Email reminder to everyone whose turn it is (Circularo allows one per share per day).
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", rid)) as List<object>;
+                        var rq = FirstRow(JSer(got));
+                        if (rq == null) throw new Exception("Request not found.");
+                        if (!IsCreatorOrAdmin(cfg, rq, who[0])) throw new Exception("Only the person who created the request can send reminders.");
+                        if (JS(rq, "state") != "inprogress") throw new Exception("The request is " + JS(rq, "state") + ".");
+                        var shares = new List<object>();
+                        foreach (var ro in (got.Count > 1 ? got[1] as List<object> : new List<object>()))
+                            if (JS(ro, "status") == "waiting" && JS(ro, "share_id") != "") { var x = new Dictionary<string, object>(); x["shareId"] = JS(ro, "share_id"); shares.Add(x); }
+                        if (shares.Count == 0) throw new Exception("Nobody is waiting to act.");
+                        var body = new Dictionary<string, object>(); body["documentId"] = JS(rq, "circularo_document_id"); body["reminderType"] = "email"; body["shares"] = shares;
+                        Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "POST", "/share/reminder", body, ref dbg);
+                        DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "reminder_sent", "@Outcome", "ok", "@RequestId", rid, "@Detail", shares.Count + " recipient(s)");
+                        result = "{\"requestId\":" + rid + ",\"reminded\":" + shares.Count + "}";
                         break;
                     }
                     case "user_list":
