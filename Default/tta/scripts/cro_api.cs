@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.19.0";
+        private const string VERSION = "cro-api 0.20.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1420,6 +1420,56 @@ namespace Cro
             try { mi.Invoke(Activator.CreateInstance(st), new object[] { session, info }); }
             catch (TargetInvocationException e) { throw new Exception("SendEmail2: " + Inner(e)); }
         }
+        // ---- branded email layout (tables and inline styles so it holds up in Outlook, Gmail and phones) ----
+        private static string BrandName(object cfg) { string n = JS(JO(JO(cfg, "mail"), "brand"), "name"); return n == "" ? "My e-Signing" : n; }
+        private static string FormsUrl(object cfg, string form) { string b = JS(JO(JO(cfg, "mail"), "brand"), "formsUrl"); if (b == "") return ""; if (!b.EndsWith("/")) b += "/"; return b + form + ".form"; }
+        // rows: label/value pairs (values already HTML-encoded); button only when url is set
+        private static string MailLayout(object cfg, string heading, string intro, List<string[]> rows, string buttonText, string buttonUrl, string after, string preheader)
+        {
+            var b = JO(JO(cfg, "mail"), "brand");
+            string name = HtmlEnc(BrandName(cfg));
+            string foot = HtmlEnc(JS(b, "footer") != "" ? JS(b, "footer") : "Tungsten TotalAgility and Circularo integration");
+            string F = "font-family:Red Hat Display,Segoe UI,Helvetica,Arial,sans-serif;";
+            string H = "font-family:League Spartan,Segoe UI,Helvetica,Arial,sans-serif;";
+            var sb = new StringBuilder();
+            sb.Append("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>").Append(HtmlEnc(heading)).Append("</title></head>");
+            sb.Append("<body data-cro-mail='1' style='margin:0;padding:0;background:#F6F7FB;'>");
+            sb.Append("<div style='display:none;max-height:0;overflow:hidden;opacity:0;color:#F6F7FB;'>").Append(HtmlEnc(preheader)).Append("</div>");
+            sb.Append("<table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0' bgcolor='#F6F7FB' style='background:#F6F7FB;'><tr><td align='center' style='padding:28px 12px;'>");
+            sb.Append("<table role='presentation' width='600' cellpadding='0' cellspacing='0' border='0' style='width:100%;max-width:600px;'>");
+            // header: Tungsten navy meeting Circularo indigo, signed with the coral-to-amber stroke
+            sb.Append("<tr><td style='padding:0;'><table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0'><tr>");
+            sb.Append("<td bgcolor='#002854' width='62%' style='background:#002854;background:linear-gradient(135deg,#002854 0%,#002854 70%,#0F0069 70%);padding:22px 28px;border-radius:10px 0 0 0;'>");
+            sb.Append("<table role='presentation' cellpadding='0' cellspacing='0' border='0'><tr><td width='30' height='30' align='center' valign='middle' bgcolor='#7000FF' style='width:30px;min-width:30px;height:30px;background:#7000FF;border-radius:15px;color:#ffffff;font:700 16px/30px Arial,sans-serif;'>✓</td>");
+            sb.Append("<td style='padding-left:10px;").Append(H).Append("font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.2px;white-space:nowrap;'>").Append(name).Append("</td></tr></table></td>");
+            sb.Append("<td bgcolor='#0F0069' style='background:#0F0069;padding:22px 20px;border-radius:0 10px 0 0;").Append(F).Append("font-size:12px;color:#C9C3F5;text-align:right;white-space:nowrap;'>TotalAgility + Circularo</td></tr>");
+            sb.Append("<tr><td colspan='2' height='4' bgcolor='#FF6D69' style='height:4px;line-height:4px;font-size:0;background:#FF6D69;background:linear-gradient(90deg,#FF6D69,#FFC600);'> </td></tr></table></td></tr>");
+            // card
+            sb.Append("<tr><td bgcolor='#ffffff' style='background:#ffffff;padding:32px 28px 28px;border:1px solid #E4E7EF;border-top:0;border-radius:0 0 10px 10px;").Append(F).Append("font-size:15px;line-height:1.55;color:#1B1B2F;'>");
+            sb.Append("<h1 style='margin:0 0 14px;").Append(H).Append("font-size:26px;line-height:1.15;font-weight:800;color:#0F0069;'>").Append(HtmlEnc(heading)).Append("</h1>");
+            sb.Append(intro);
+            if (rows != null && rows.Count > 0)
+            {
+                sb.Append("<table role='presentation' width='100%' cellpadding='0' cellspacing='0' border='0' style='margin:18px 0 6px;border-collapse:collapse;'>");
+                foreach (var r in rows)
+                    sb.Append("<tr><td style='padding:9px 0;border-top:1px solid #E4E7EF;").Append(F).Append("font-size:13px;color:#667085;width:38%;vertical-align:top;'>").Append(HtmlEnc(r[0]))
+                      .Append("</td><td style='padding:9px 0;border-top:1px solid #E4E7EF;").Append(F).Append("font-size:14px;color:#1B1B2F;font-weight:700;vertical-align:top;'>").Append(r[1]).Append("</td></tr>");
+                sb.Append("</table>");
+            }
+            if (buttonUrl != "")
+            {
+                sb.Append("<table role='presentation' cellpadding='0' cellspacing='0' border='0' style='margin:24px 0 8px;'><tr><td bgcolor='#0F0069' style='background:#0F0069;border-radius:8px;'>");
+                sb.Append("<a href='").Append(HtmlEnc(buttonUrl)).Append("' target='_blank' style='display:inline-block;padding:14px 26px;").Append(F).Append("font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:8px;'>").Append(HtmlEnc(buttonText)).Append("</a></td></tr></table>");
+                sb.Append("<p style='margin:10px 0 0;font-size:12px;color:#667085;'>If the button does not work, copy this link into your browser:<br><a href='").Append(HtmlEnc(buttonUrl)).Append("' style='color:#7000FF;word-break:break-all;'>").Append(HtmlEnc(buttonUrl)).Append("</a></p>");
+            }
+            sb.Append(after);
+            sb.Append("</td></tr>");
+            // footer
+            sb.Append("<tr><td style='padding:18px 28px;").Append(F).Append("font-size:12px;line-height:1.5;color:#667085;'>Sent by ").Append(name).Append(", ").Append(foot).Append(".<br>Built by Sudocode Solutions.</td></tr>");
+            sb.Append("</table></td></tr></table></body></html>");
+            return sb.ToString();
+        }
+        private static string P(string html) { return "<p style='margin:0 0 12px;'>" + html + "</p>"; }
         private static string Fill(string t, Dictionary<string, string> v) { foreach (var kv in v) t = t.Replace("{" + kv.Key + "}", kv.Value); return t; }
         private static string HtmlEnc(string s) { return System.Net.WebUtility.HtmlEncode(s ?? ""); }
         // Send one reminder email; returns "ok: <email>" or throws.
@@ -1440,14 +1490,20 @@ namespace Cro
             string sender = JS(r, "created_by_name"); int pi = sender.LastIndexOf(" ("); if (pi > 0) sender = sender.Substring(0, pi);
             var v = new Dictionary<string, string>();
             v["name"] = HtmlEnc(JS(r, "full_name") != "" ? JS(r, "full_name") : JS(r, "email")); v["title"] = HtmlEnc(JS(r, "title")); v["url"] = HtmlEnc(link[0]);
-            v["sender"] = HtmlEnc(sender == "" ? "CRO e-Signing" : sender); v["deadline"] = HtmlEnc(deadline);
+            v["sender"] = HtmlEnc(sender == "" ? BrandName(cfg) : sender); v["deadline"] = HtmlEnc(deadline);
             v["action"] = HtmlEnc(JS(r, "share_purpose") == "approve" ? "approve" : JS(r, "share_purpose") == "review" ? "review" : JS(r, "share_purpose") == "accept" ? "accept" : "sign");
             v["howto"] = link[1] == "external_link" ? "Circularo will email you a one-time code when you open the link." : "Sign in to Circularo with your account if asked.";
             string q = ((char)34).ToString();
             string subject = Fill(JS(rc, "subject") != "" ? JS(rc, "subject") : "Reminder: please {action} " + q + "{title}" + q, v).Replace("&" + "quot;", q).Replace("&" + "#39;", "'").Replace("&" + "amp;", "&");   // entities split: TotalAgility decodes HTML entities in script text
-            string body = Fill(JS(rc, "body") != "" ? JS(rc, "body") :
-                "<p>Dear {name},</p><p>{sender} is waiting for you to {action} <b>{title}</b>{deadline_text}.</p><p><a href='{url}'>Open the document in Circularo</a></p><p>{howto}</p><p style='color:#667085;font-size:12px'>Sent by CRO e-Signing (TotalAgility).</p>", v)
-                .Replace("{deadline_text}", deadline == "" ? "" : " by " + HtmlEnc(deadline));
+            string act = v["action"];
+            string heading = act == "approve" ? "Your approval is needed" : act == "review" ? "Your review is needed" : act == "accept" ? "Your acceptance is needed" : "Your signature is needed";
+            string intro = JS(rc, "body") != "" ? Fill(JS(rc, "body"), v).Replace("{deadline_text}", deadline == "" ? "" : " by " + HtmlEnc(deadline))
+                : P("Dear " + v["name"] + ",") + P(v["sender"] + " is waiting for you to " + act + " <b>" + v["title"] + "</b>" + (deadline == "" ? "" : " by " + v["deadline"]) + ".");
+            var rows = new List<string[]> { new[] { "Document", v["title"] }, new[] { "Requested by", v["sender"] } };
+            if (deadline != "") rows.Add(new[] { "Deadline", v["deadline"] });
+            string body = MailLayout(cfg, heading, intro, rows, act == "sign" ? "Review and sign" : "Open the document", link[0],
+                "<p style='margin:16px 0 0;font-size:13px;color:#4A5265;'>" + HtmlEnc(v["howto"]) + "</p>",
+                sender + " is waiting for you to " + act + " " + JS(r, "title") + ".");
             SendMail(cfg, conn, session, new List<string> { JS(r, "email") }, subject, body, ref dbg);
             DbQuery(conn, "cro_api.reminder_mark", "@RecipientId", Convert.ToInt64(JN(r, "recipient_id")), "@Outcome", "ok", "@Detail", JS(r, "email") + " (" + link[1] + ")", "@Actor", actor);
             return "ok: " + JS(r, "email");
@@ -1508,6 +1564,7 @@ namespace Cro
             var mc = JO(cfg, "mail");
             string provider = JS(mc, "provider") == "" ? "tta" : JS(mc, "provider");
             if (to == null || to.Count == 0) throw new Exception("No recipient for the email.");
+            if (html.IndexOf("data-cro-mail", StringComparison.Ordinal) < 0) html = MailLayout(cfg, subject, html, null, "", "", "", subject);
             if (provider == "graph")
             {
                 var g = JO(mc, "graph");
@@ -2199,7 +2256,9 @@ namespace Cro
                         // Admin: send a test email to ARGS.to (default: the caller) with the configured provider
                         if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
                         string to = Arg(a, "to", 254); if (to == "") to = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
-                        SendMail(cfg, conn, In(sp, "SPP_SYSTEM_SESSION_ID"), new List<string> { to }, "CRO e-Signing test email", "<p>This is a test email from CRO e-Signing (" + VERSION + ").</p>", ref dbg);
+                        SendMail(cfg, conn, In(sp, "SPP_SYSTEM_SESSION_ID"), new List<string> { to }, BrandName(cfg) + " test email",
+                            MailLayout(cfg, "Email is working", P("This is a test email from " + HtmlEnc(BrandName(cfg)) + ". If you can read this, reminders and notifications will reach people too."),
+                                new List<string[]> { new[] { "Provider", HtmlEnc(JS(JO(cfg, "mail"), "provider")) }, new[] { "Version", HtmlEnc(VERSION) } }, "", "", "", "Test email from " + BrandName(cfg)), ref dbg);
                         result = "{\"sent\":true,\"to\":" + JQ(to) + ",\"provider\":" + JQ(JS(JO(cfg, "mail"), "provider")) + "}";
                         break;
                     }
@@ -2217,9 +2276,13 @@ namespace Cro
                         {
                             try
                             {
-                                SendMail(cfg, conn, In(sp, "SPP_SYSTEM_SESSION_ID"), admins, "CRO e-Signing: account requested by " + who[1],
-                                    "<p>" + HtmlEnc(who[1]) + " (" + HtmlEnc(em == "" ? "no email in TotalAgility" : em) + ") has asked for a Circularo account to use CRO e-Signing.</p>"
-                                    + (Arg(a, "note", 1000) != "" ? "<p>Note: " + HtmlEnc(Arg(a, "note", 1000)) + "</p>" : "") + "<p>Open the CRO Users page to invite or decline.</p>", ref dbg);
+                                var arows = new List<string[]> { new[] { "Name", HtmlEnc(who[1]) }, new[] { "Email", HtmlEnc(em == "" ? "no email in TotalAgility" : em) } };
+                                if (Arg(a, "note", 1000) != "") arows.Add(new[] { "Note", HtmlEnc(Arg(a, "note", 1000)) });
+                                SendMail(cfg, conn, In(sp, "SPP_SYSTEM_SESSION_ID"), admins, BrandName(cfg) + ": account requested by " + who[1],
+                                    MailLayout(cfg, "Account requested", P(HtmlEnc(who[1]) + " has asked for a Circularo account to use " + HtmlEnc(BrandName(cfg)) + "."), arows,
+                                        "Open the Users page", FormsUrl(cfg, "CRO_Users"),
+                                        "<p style='margin:16px 0 0;font-size:13px;color:#4A5265;'>Invite them from the Users page, or decline the request there.</p>",
+                                        who[1] + " has asked for a Circularo account."), ref dbg);
                                 mailed = true;
                             }
                             catch (Exception ex) { dbg += "admin email: " + Inner(ex) + " "; }

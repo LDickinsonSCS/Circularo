@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "note": "CRO configuration. Read-only at runtime. No secrets here: the Circularo API key is the secure server variable CRO_API_KEY.",
   "circularo": {
     "apiBase": "https://sudocode.sandbox.circularo.com/api/v1",
@@ -789,7 +789,12 @@
       "sender": "ta.demo@sudocodesolutions.com",
       "saveToSentItems": false
     },
-    "note": "provider graph = Microsoft Graph sendMail (app with Mail.Send; client secret entered in secure variable CRO_GRAPH_SECRET, then key_migrate {name:'graph'}); provider tta = TotalAgility mail settings with 'from'."
+    "note": "provider graph = Microsoft Graph sendMail (app with Mail.Send; client secret entered in secure variable CRO_GRAPH_SECRET, then key_migrate {name:'graph'}); provider tta = TotalAgility mail settings with 'from'. brand: name, formsUrl (links in admin emails) and footer used by the branded email layout.",
+    "brand": {
+      "name": "My e-Signing",
+      "formsUrl": "https://portal.sudocodesolutions.com/TotalAgility/Forms/",
+      "footer": "Tungsten TotalAgility and Circularo integration"
+    }
   },
   "access": {
     "requireCircularoAccount": true,
