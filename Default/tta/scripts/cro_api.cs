@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.12.0";
+        private const string VERSION = "cro-api 0.14.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -424,6 +424,24 @@ namespace Cro
             if (placement != "anchors") anchors = new List<object>();
             // Ad hoc "tokens": {{sign:n}} in the document marks the field of recipient n (1-based, recipient order as listed).
             bool tokens = placement == "adhoc" && JS(req, "adhoc_option") == "tokens";
+            // Ad hoc "detect": find common signing wording ("Signed by", "Signed on behalf of", ...) and put a field just above it.
+            bool detect = placement == "adhoc" && JS(req, "adhoc_option") == "detect";
+            var dcfg = JO(JO(cfg, "adhoc"), "detect");
+            if (detect)
+            {
+                anchors = new List<object>();
+                var phrases = JL(dcfg, "phrases") ?? new List<object> { "Signed for and on behalf of", "Signed on behalf of", "Signed by", "Authorised signatory", "Authorized signatory", "Signature:" };
+                for (int pi = 0; pi < phrases.Count; pi++)
+                {
+                    var da = new Dictionary<string, object>();
+                    da["id"] = "CRO_DETECT_" + pi; da["text"] = Convert.ToString(phrases[pi]); da["type"] = "detect"; da["allMatches"] = true;
+                    var off = new Dictionary<string, object>();
+                    off["percentX"] = JN(dcfg, "offsetX"); off["percentY"] = JN(dcfg, "offsetY") != 0 ? JN(dcfg, "offsetY") : -0.055;
+                    off["percentWidth"] = JN(dcfg, "width") > 0 ? JN(dcfg, "width") : 0.25; off["percentHeight"] = JN(dcfg, "height") > 0 ? JN(dcfg, "height") : 0.045;
+                    da["offset"] = off;
+                    anchors.Add(da);
+                }
+            }
             if (tokens)
             {
                 var tk = JO(JO(cfg, "adhoc"), "tokens");
@@ -520,6 +538,39 @@ namespace Cro
             var covered = new HashSet<long>();
             var notes = new List<string>();
             bool annotations = JS(JO(cfg, "defaults"), "annotations").ToLowerInvariant() == "true";
+            if (detect)
+            {
+                // all matches of all phrases, top to bottom; the k-th one goes to the k-th signing recipient (in the order given)
+                var hits = new List<Dictionary<string, object>>();
+                foreach (var ao in anchors)
+                {
+                    List<Dictionary<string, object>> ms;
+                    if (found.TryGetValue(JS(ao, "id"), out ms)) foreach (var m in ms) { var hh = new Dictionary<string, object>(m); hh["_off"] = JO(ao, "offset"); hits.Add(hh); }
+                }
+                hits.Sort((x, y) => { int c = JN(x, "page").CompareTo(JN(y, "page")); if (c != 0) return c; c = JN(JO(x, "position"), "percentY").CompareTo(JN(JO(y, "position"), "percentY")); return c != 0 ? c : JN(JO(x, "position"), "percentX").CompareTo(JN(JO(y, "position"), "percentX")); });
+                // a longer phrase and a shorter one inside it hit the same spot: keep one per spot
+                var uniq = new List<Dictionary<string, object>>();
+                foreach (var hh in hits)
+                {
+                    bool dup = false;
+                    foreach (var u in uniq) if (JN(u, "page") == JN(hh, "page") && Math.Abs(JN(JO(u, "position"), "percentY") - JN(JO(hh, "position"), "percentY")) < 0.01) dup = true;
+                    if (!dup) uniq.Add(hh);
+                }
+                var signRids = new List<long>();
+                foreach (var rid0 in byInsert) foreach (var ro in rcps) if (Convert.ToInt64(JN(ro, "recipient_id")) == rid0 && "sign approve accept".Contains(JS(ro, "share_purpose"))) signRids.Add(rid0);
+                for (int k = 0; k < uniq.Count && k < signRids.Count; k++)
+                {
+                    var m = uniq[k]; var mp = JO(m, "position"); var off = JO(m, "_off");
+                    var f = new Dictionary<string, object>();
+                    f["user"] = new List<object> { shareTo[signRids[k]] }; f["type"] = "signature";
+                    f["pages"] = new List<object> { JN(m, "page") };
+                    f["position"] = Pos(JN(mp, "percentX"), JN(mp, "percentY"), JN(off, "percentWidth"), JN(off, "percentHeight"));
+                    f["required"] = true; f["timestamp"] = true;
+                    sigFields.Add(f); covered.Add(signRids[k]);
+                }
+                notes.Add("signing wording found " + uniq.Count + " time(s) for " + signRids.Count + " signer(s)");
+                anchors = new List<object>();
+            }
             foreach (var ao in anchors)
             {
                 var a = ao as Dictionary<string, object>;
@@ -582,7 +633,7 @@ namespace Cro
             // 4. ad hoc / fallback: default position on the last page for every signer without a field
             var dp = JO(JO(cfg, "adhoc"), "defaultPosition");
             int idx = 0;
-            string placementUsed = tokens ? "tokens" : anchors.Count > 0 ? "anchors" : placedCount > 0 ? "tta_placer" : "adhoc";
+            string placementUsed = detect ? (covered.Count > 0 ? "detect" : "adhoc") : tokens ? "tokens" : anchors.Count > 0 ? "anchors" : placedCount > 0 ? "tta_placer" : "adhoc";
             foreach (var ro in rcps)
             {
                 var r = ro as Dictionary<string, object>;
@@ -603,7 +654,7 @@ namespace Cro
                 f["tooltip"] = "Signature";
                 sigFields.Add(f);
                 idx++;
-                placementUsed = tokens ? (covered.Count > 0 ? "tokens+default" : "default_position") : anchors.Count > 0 ? "anchors+default" : placedCount > 0 ? "tta_placer+default" : "default_position";
+                placementUsed = detect ? (covered.Count > 0 ? "detect+default" : "default_position") : tokens ? (covered.Count > 0 ? "tokens+default" : "default_position") : anchors.Count > 0 ? "anchors+default" : placedCount > 0 ? "tta_placer+default" : "default_position";
             }
 
             // 5. document
@@ -898,6 +949,12 @@ namespace Cro
             var req = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
             if (req == null) return "request not found";
             string state = JS(req, "state");
+            if (state == "sending" && JS(req, "placement_used") == "circularo_editor")
+            {
+                int got = ImportShares(cfg, conn, key, rid, ref dbg);
+                if (got == 0) return "waiting for the sender to send from the Circularo editor";
+                state = "inprogress";
+            }
             if (state == "inprogress" || state == "sending" || (state == "completed" && JS(req, "outputs_retrieved_utc") == ""))
             {
                 if (state != "completed")
@@ -1189,6 +1246,87 @@ namespace Cro
             sp.OutputVariables["RESULT"] = result;
             sp.OutputVariables["ERROR"] = err;
             sp.OutputVariables["DEBUG"] = dbg.Length > 3900 ? dbg.Substring(0, 3900) : dbg;
+        }
+
+        // ---- ad hoc "Circularo editor": upload + create the document, share it to the sender for editing ----
+        private static string Prepare(object cfg, string conn, string key, string actor, string senderUsername, long requestId, string fileName, byte[] file, string returnUrl, ref string dbg)
+        {
+            var req = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId));
+            if (req == null) throw new Exception("Request not found.");
+            if (JS(req, "state") != "draft") throw new Exception("Request is " + JS(req, "state") + ", not draft.");
+            var cx = JO(cfg, "circularo");
+            string docType = JS(req, "document_type") == "" ? JS(cx, "documentType") : JS(req, "document_type");
+            if (file == null || file.Length == 0) throw new Exception("No file.");
+            var fields = new Dictionary<string, string>(); fields["fileName"] = fileName;
+            string boundary = "----cro" + Guid.NewGuid().ToString("N");
+            string ext = Path.GetExtension(fileName).ToLowerInvariant();
+            string ctype = ext == ".pdf" ? "application/pdf" : ext == ".docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "application/octet-stream";
+            var up = HttpBytes("POST", JS(cx, "apiBase").TrimEnd('/') + "/files/saveFile?token=" + Uri.EscapeDataString(key), Multipart(boundary, fields, "file", fileName, ctype, file), "multipart/form-data; boundary=" + boundary, 180);
+            string upText = Encoding.UTF8.GetString((byte[])up[1]).Replace(key, "***");
+            if ((int)up[0] != 200) throw new Exception("Circularo upload -> " + up[0] + ": " + (upText.Length > 300 ? upText.Substring(0, 300) : upText));
+            var fo = JO(JParse(upText), "file"); string hash = JS(fo, "hash"); if (hash == "") hash = JS(fo, "id");
+            if (hash == "") throw new Exception("Upload returned no file hash.");
+            var body = new Dictionary<string, object>(); body["documentType"] = docType; body["documentTitle"] = JS(req, "title");
+            var pdf = new Dictionary<string, object>(); pdf["content"] = hash; body["pdfFile"] = pdf;
+            var dr = new Dictionary<string, object>(); dr["body"] = body;
+            dr["definitionType"] = JS(cx, "definitionType") == "" ? "ext" : JS(cx, "definitionType");
+            dr["workflow"] = JS(cx, "workflow") == "" ? "wf_archive" : JS(cx, "workflow");
+            if (JS(cx, "folderPath") != "") { var od = new Dictionary<string, object>(); od["path"] = JS(cx, "folderPath"); dr["optionalData"] = od; }
+            var res = Cx(cfg, key, "POST", "/documents", dr, ref dbg);
+            string docId = JS(res, "id"); if (docId == "") { var rr = JL(res, "results"); if (rr != null && rr.Count > 0) docId = JS(rr[0], "documentId"); }
+            if (docId == "") throw new Exception("Circularo did not return a document id.");
+            DbQuery(conn, "cro_api.request_set_document", "@RequestId", requestId, "@DocumentId", docId, "@FileHash", hash, "@PlacementUsed", "circularo_editor", "@Detail", "Prepared for the Circularo editor; shared for editing to " + senderUsername);
+            var d = new Dictionary<string, object>(); d["sharePurpose"] = "edit"; d["shareTo"] = senderUsername;
+            var sh = new Dictionary<string, object>(); sh["objectType"] = "document"; sh["type"] = docType; sh["id"] = docId; sh["data"] = new List<object> { d };
+            Cx(cfg, key, "POST", "/share", sh, ref dbg);
+            string fe = JS(cx, "frontendBase").TrimEnd('/');
+            string url = fe + "/signPrepare?mode=create&documentId=" + Uri.EscapeDataString(docId) + "&documentType=" + Uri.EscapeDataString(docType)
+                       + (returnUrl.StartsWith("https://") ? "&callbackUrl=" + Uri.EscapeDataString(returnUrl) : "");
+            var o = new Dictionary<string, object>(); o["requestId"] = (double)requestId; o["documentId"] = docId; o["url"] = url;
+            o["note"] = "Sign in to Circularo as " + senderUsername + " if asked, add recipients and fields, then send.";
+            return JSer(o);
+        }
+        // Read the shares the sender created in Circularo and import them as the request's recipients.
+        private static int ImportShares(object cfg, string conn, string key, long requestId, ref string dbg)
+        {
+            var req = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId));
+            if (req == null || JS(req, "state") != "sending") return 0;
+            var dj = Cx(cfg, key, "GET", "/documents/" + Uri.EscapeDataString(JS(req, "circularo_document_id")), null, ref dbg);
+            var rl = JL(dj, "results"); var doc = rl != null && rl.Count > 0 ? rl[0] : dj;
+            var hist = JL(JO(doc, "workflow"), "history") ?? new List<object>();
+            var seen = new HashSet<string>(); var shares = new List<Dictionary<string, object>>(); bool seq = false;
+            for (int i = hist.Count - 1; i >= 0; i--)   // history is newest first: walk oldest first
+            {
+                var h = hist[i];
+                if (JS(h, "name") != "shared_with") continue;
+                if (JS(h, "shareSequential").ToLowerInvariant() == "true") seq = true;
+                foreach (var so in (JL(h, "share") ?? new List<object>()))
+                {
+                    string sid = JS(so, "shareId"); if (sid == "" || !seen.Add(sid)) continue;
+                    shares.Add(so as Dictionary<string, object>);
+                }
+            }
+            if (shares.Count == 0) return 0;
+            var users = FirstSet(DbQuery(conn, "cro_api.user_list"));
+            var list = new List<object>(); int n = 0;
+            foreach (var so in shares)
+            {
+                n++;
+                var to = JO(so, "shareTo"); string name = JS(to, "name"), type = JS(to, "type");
+                string email = name, full = "";
+                foreach (var u in users) if (string.Equals(JS(u, "circularo_username"), name, StringComparison.OrdinalIgnoreCase)) { email = JS(u, "email"); full = JS(u, "full_name"); }
+                if (type == "internal" && email == name)
+                {
+                    try { var ud = Cx(cfg, key, "GET", "/users/" + Uri.EscapeDataString(name), null, ref dbg); if (JS(ud, "mail") != "") email = JS(ud, "mail"); if (full == "") full = JS(ud, "fullname"); }
+                    catch (Exception ex) { dbg += "user " + name + ": " + Inner(ex) + " "; }
+                }
+                var e = new Dictionary<string, object>();
+                e["order"] = (double)(seq ? n : 1); e["kind"] = type == "internal" ? "internal" : "external"; e["email"] = email; e["fullName"] = full;
+                e["purpose"] = JS(so, "sharePurpose") != "" ? JS(so, "sharePurpose") : "sign"; e["shareId"] = JS(so, "shareId"); e["shareTo"] = name;
+                list.Add(e);
+            }
+            DbQuery(conn, "cro_api.request_import_recipients", "@RequestId", requestId, "@Json", JSer(list), "@Actor", "system");
+            return list.Count;
         }
 
         // ---- signing link for the caller (must be a recipient of the request) ----
@@ -1691,6 +1829,32 @@ namespace Cro
                             var rt = mi.ReturnType; var m = new Dictionary<string, object>(); m["name"] = mi.Name; m["returns"] = rt.FullName + (rt.Namespace != null && rt.Namespace.StartsWith("Agility") ? " {" + string.Join(", ", Array.ConvertAll(rt.GetProperties(), x => x.Name + ":" + x.PropertyType.Name)) + "}" : ""); m["params"] = ps; outl.Add(m);
                         }
                         result = JSer(outl);
+                        break;
+                    }
+                    case "request_prepare":
+                    {
+                        // ARGS: { requestId, fileName, fileB64, returnUrl }  Ad hoc "Circularo editor". Creator only; needs a linked Circularo account.
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        var rq = FirstRow(DbQuery(conn, "cro_api.request_get", "@RequestId", rid));
+                        if (rq == null) throw new Exception("Request not found.");
+                        if (!string.Equals(JS(rq, "created_by_resource_id"), who[0], StringComparison.OrdinalIgnoreCase)) throw new Exception("Only the person who created the request can prepare it.");
+                        string uname = "";
+                        foreach (var u in FirstSet(DbQuery(conn, "cro_api.user_list")))
+                            if (string.Equals(JS(u, "tta_resource_id"), who[0], StringComparison.OrdinalIgnoreCase) && JS(u, "status") == "active") uname = JS(u, "circularo_username");
+                        if (uname == "") throw new Exception("You need an active Circularo account linked on the Users page to use the Circularo editor.");
+                        string fn = Arg(a, "fileName", 200); if (fn == "") fn = "document.pdf";
+                        result = Prepare(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), who[1] + " (" + who[0] + ")", uname, rid, fn,
+                                         Convert.FromBase64String(JS(a, "fileB64")), Arg(a, "returnUrl", 500), ref dbg);
+                        break;
+                    }
+                    case "request_import":
+                    {
+                        // ARGS: { requestId }  Pick up recipients after the sender sent from the Circularo editor (Sync does this too).
+                        long rid; if (!long.TryParse(Arg(a, "requestId", 20), out rid)) throw new Exception("requestId is required.");
+                        string key = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
+                        int got = ImportShares(cfg, conn, key, rid, ref dbg);
+                        if (got > 0) RefreshRequest(cfg, conn, key, rid, "poll", ref dbg);
+                        result = "{\"requestId\":" + rid + ",\"imported\":" + got + "}";
                         break;
                     }
                     case "user_list":

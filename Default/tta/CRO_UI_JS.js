@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.6.0';
+  var VERSION = 'cro-ui 0.7.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -265,7 +265,7 @@
       });
       var finished = suc.finished || 0, rate = finished ? Math.round(100 * (suc.completed || 0) / finished) : null;
       var mixTotal = 0; mix.forEach(function (m) { mixTotal += m.requests; });
-      var MIXL = { anchors: 'Anchor text', default_position: 'Default position (ad hoc)', 'anchors+default': 'Anchors + default', adhoc: 'Ad hoc', coordinates: 'Coordinates', template: 'Circularo template', word_template: 'Word template', detect: 'Field detection', tokens: '{{sign:n}} tokens', 'tokens+default': 'Tokens + default', tta_placer: 'Placed in TotalAgility', 'tta_placer+default': 'Placed + default' };
+      var MIXL = { anchors: 'Anchor text', default_position: 'Default position (ad hoc)', 'anchors+default': 'Anchors + default', adhoc: 'Ad hoc', coordinates: 'Coordinates', template: 'Circularo template', word_template: 'Word template', detect: 'Signing wording', tokens: '{{sign:n}} tokens', 'tokens+default': 'Tokens + default', tta_placer: 'Placed in TotalAgility', 'tta_placer+default': 'Placed + default', 'detect+default': 'Wording + default', circularo_editor: 'Circularo editor' };
       var stat = function (n, label, colour, filter) {
         return '<a class="cro-card cro-stat" href="' + link('requests', 'filter=' + filter + (dash.scope === 'all' ? '&scope=all' : '')) + '"><div class="l">' + label + '</div><div class="n" style="color:' + colour + '">' + (n || 0) + '</div></a>';
       };
@@ -533,10 +533,10 @@
             (lay && /^anchors/.test(lay.placement)
               ? '<div class="cro-note">Fields are placed by anchor text in the document. Choose which field each recipient gets in the table below.</div>'
               : '<div class="cro-f"><label>Ad hoc placement</label>' + (O.adhocOptions || ['default_position']).map(function (a) {
-                  var lab = { default_position: 'Default position on the last page', circularo_editor: 'Place in Circularo\'s editor', tta_placer: 'Place in TotalAgility', detect: 'Detect signature lines', tokens: '{{sign:n}} tokens' }[a] || a;
-                  var ready = a === 'default_position' || a === 'tokens' || a === 'tta_placer';
+                  var lab = { default_position: 'Default position on the last page', circularo_editor: 'Place in Circularo\'s editor', tta_placer: 'Place in TotalAgility', detect: 'Find "Signed by / on behalf of" wording', tokens: '{{sign:n}} tokens' }[a] || a;
+                  var ready = true;
                   return '<label class="cro-radio' + (ready ? '' : ' off') + '"><input type="radio" name="croAdhoc" value="' + a + '"' + (S.adhocOption === a ? ' checked' : '') + (ready ? '' : ' disabled') + '> ' + esc(lab) + (ready ? '' : ' <small>not built yet</small>') + '</label>';
-                }).join('') + (S.adhocOption === 'tokens' ? '<div class="cro-note" style="margin-top:8px">Put <b>{{sign:1}}</b>, <b>{{sign:2}}</b> … in the document where each recipient signs (number = row in the recipients table). Recipients without a token get the default position.</div>' : '') + '</div>') +
+                }).join('') + (S.adhocOption === 'detect' ? '<div class="cro-note" style="margin-top:8px">A signature field goes just above each "Signed by", "Signed on behalf of", "Authorised signatory" or "Signature:" found, top to bottom, one per signing recipient in table order. Recipients left over get the default position.</div>' : '') + (S.adhocOption === 'circularo_editor' ? '<div class="cro-note" style="margin-top:8px">The document opens in Circularo\'s own editor, where you add recipients and fields and send. Needs your Circularo account linked on the Users page; the recipients below are only placeholders – CRO imports the ones you choose in Circularo.</div>' : '') + (S.adhocOption === 'tokens' ? '<div class="cro-note" style="margin-top:8px">Put <b>{{sign:1}}</b>, <b>{{sign:2}}</b> … in the document where each recipient signs (number = row in the recipients table). Recipients without a token get the default position.</div>' : '') + '</div>') +
           '</div></div>' +
           '<div class="cro-card" style="margin-top:16px"><h2>3. Recipients <small>' + (mode === 'signnow' ? 'just you' : S.rcps.length + ' of up to 100') + '</small></h2>' +
             (mode !== 'signnow' ? '<label class="cro-check"><input type="checkbox" id="croSeq"' + (S.sequential ? ' checked' : '') + '> Signing order (same number = sign in parallel)</label>' : '') +
@@ -629,7 +629,9 @@
           S.busy = 'Creating the request…'; draw();
           return cro('request_create', body).then(function (c) {
             created = set0(c)[0];
-            S.busy = 'Uploading to Circularo and sharing…'; draw();
+            var editor = !(L[S.layout] && /^anchors/.test(L[S.layout].placement)) && S.adhocOption === 'circularo_editor';
+            S.busy = editor ? 'Uploading to Circularo…' : 'Uploading to Circularo and sharing…'; draw();
+            if (editor) return cro('request_prepare', { requestId: created.request_id, fileName: S.file.name, fileB64: b64, returnUrl: location.origin + link('request', 'id=' + created.request_id) }).then(function (r) { r.editor = true; return r; });
             return cro('request_send', { requestId: created.request_id, fileName: S.file.name, fileB64: b64, fields: placing() ? S.fields : [] });
           });
         }).then(function (res) {
@@ -641,13 +643,20 @@
       };
       var drawDone = function () {
         var d = S.done, r = d.res || {};
+        if (r.editor) {
+          main().innerHTML = '<div class="cro-card cro-done"><div class="big">✎</div><h1>Ready for the Circularo editor</h1>' +
+            '<p><b>' + esc(d.title) + '</b> · request ' + esc(d.req.request_id) + '</p><p class="cro-sub">' + esc(r.note) + ' When you send in Circularo, CRO picks up the recipients automatically.</p>' +
+            '<div class="cro-actions" style="justify-content:center"><a class="cro-btn" href="' + esc(r.url) + '" target="_blank" rel="noopener">Open Circularo editor</a>' +
+            '<a class="cro-btn2" href="' + link('request', 'id=' + d.req.request_id) + '">View request</a><a class="cro-btn2" href="' + link('dashboard') + '">Dashboard</a></div></div>';
+          return;
+        }
         var first = S.rcps.reduce(function (m, x) { return Math.min(m, S.sequential ? x.order : 1); }, 99);
         var myTurn = S.rcps.some(function (x) { return x.me && (S.sequential ? x.order : 1) === first; });
         main().innerHTML =
           '<div class="cro-card cro-done"><div class="big">✓</div><h1>' + (mode === 'signnow' ? 'Ready to sign' : 'Sent for signature') + '</h1>' +
           '<p><b>' + esc(d.title) + '</b> · request ' + esc(d.req.request_id) + '</p>' +
           '<div class="cro-kv" style="max-width:460px;margin:16px auto;text-align:left">' +
-            '<span>Signature fields</span><b>' + esc(r.fields) + ' (' + esc({ anchors: 'anchor text', adhoc: 'ad hoc', 'anchors+default': 'anchors + default position', default_position: 'default position', tokens: '{{sign:n}} tokens', 'tokens+default': 'tokens + default position', tta_placer: 'placed in TotalAgility', 'tta_placer+default': 'placed + default position' }[r.placementUsed] || r.placementUsed) + ')</b>' +
+            '<span>Signature fields</span><b>' + esc(r.fields) + ' (' + esc({ anchors: 'anchor text', adhoc: 'ad hoc', 'anchors+default': 'anchors + default position', default_position: 'default position', tokens: '{{sign:n}} tokens', 'tokens+default': 'tokens + default position', tta_placer: 'placed in TotalAgility', 'tta_placer+default': 'placed + default position', detect: 'signing wording', 'detect+default': 'signing wording + default position' }[r.placementUsed] || r.placementUsed) + ')</b>' +
             '<span>Pages</span><b>' + esc(r.pages) + '</b>' +
             '<span>Signing order</span><b>' + (r.sequential ? 'In order' : 'All at once') + '</b>' +
             '<span>Recipients</span><b>' + esc((r.shares || []).length) + '</b></div>' +
@@ -748,6 +757,7 @@
           '<div class="cro-h1"><h1>' + esc(R.title) + ' ' + pill(R.state) + '</h1><div class="ctl">' +
             (mine ? '<button class="cro-btn" id="croSign">Sign now</button>' : '') +
             (manage && open ? '<button class="cro-btn2" id="croRefresh">Refresh status</button>' : '') +
+            (manage && R.state === 'sending' && R.placement_used === 'circularo_editor' ? '<button class="cro-btn" id="croImport">Check Circularo for recipients</button>' : '') +
             (manage && R.state === 'completed' && !R.outputs_retrieved_utc ? '<button class="cro-btn2" id="croOutputs">Fetch signed copy</button>' : '') +
             (manage && (open || R.state === 'draft' || R.state === 'failed') ? '<button class="cro-btn2 cro-danger" id="croCancel">Cancel request</button>' : '') +
           '</div></div>' +
@@ -788,6 +798,7 @@
           '</div>';
         var on = function (idv, fn) { var b = document.getElementById(idv); if (b) b.onclick = function () { fn(b); }; };
         on('croSign', function (b) { openSigning(+id, b); });
+        on('croImport', function (b) { b.disabled = true; cro('request_import', { requestId: +id }).then(function (r) { toast(r.imported ? r.imported + ' recipient(s) imported from Circularo.' : 'Not sent from the Circularo editor yet.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
         on('croRefresh', function (b) { b.disabled = true; cro('request_refresh', { requestId: +id }).then(function () { toast('Status updated from Circularo.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
         on('croOutputs', function (b) { b.disabled = true; cro('request_outputs', { requestId: +id }).then(function () { toast('Signed copy stored.'); return load(); }).catch(function (e) { b.disabled = false; toast(e.message, true); }); });
         on('croCancel', function () {
