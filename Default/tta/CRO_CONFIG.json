@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "note": "CRO configuration. Read-only at runtime. No secrets here: the Circularo API key is the secure server variable CRO_API_KEY.",
   "circularo": {
     "apiBase": "https://sudocode.sandbox.circularo.com/api/v1",
@@ -27,7 +27,8 @@
     "adhocOption": "default_position",
     "signingLaunch": "new_tab",
     "purpose": "sign",
-    "useTsa": false
+    "useTsa": false,
+    "annotations": true
   },
   "options": {
     "protection": [
