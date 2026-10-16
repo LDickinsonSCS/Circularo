@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.5.0';
+  var VERSION = 'cro-ui 0.6.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -163,6 +163,11 @@
     '.cro-danger{color:var(--cro-bad)}.cro-dangerbtn{background:var(--cro-bad);border-color:var(--cro-bad)}.cro-confirm{border-color:#FDA29B;background:#FFFBFA;margin-bottom:16px}',
     '.cro-file{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--cro-line)}.cro-file:last-child{border-bottom:0}',
     '.cro-mono{font-family:Consolas,monospace;font-weight:400}',
+    '.cro-ptools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.cro-pnav{margin-left:auto;white-space:nowrap;color:var(--cro-sub)}',
+    '.cro-page{position:relative;max-width:820px;margin:0 auto;border:1px solid var(--cro-line);box-shadow:0 2px 10px rgba(16,24,40,.08);background:#fff;user-select:none}',
+    '.cro-page img{display:block;width:100%}.cro-ov{position:absolute;inset:0;cursor:crosshair}',
+    '.cro-fld{position:absolute;border:2px dashed;border-radius:4px;font-size:11px;font-weight:600;cursor:move;display:flex;align-items:center;padding:0 4px;overflow:hidden;white-space:nowrap}',
+    '.cro-fld b{margin-left:auto;cursor:pointer;font-size:14px;padding:0 2px}',
     '.cro-foot{color:var(--cro-mute);font-size:12px;text-align:center;padding:24px}',
     'svg text{font-family:"Segoe UI",Arial,sans-serif}'
   ].join('\n');
@@ -260,7 +265,7 @@
       });
       var finished = suc.finished || 0, rate = finished ? Math.round(100 * (suc.completed || 0) / finished) : null;
       var mixTotal = 0; mix.forEach(function (m) { mixTotal += m.requests; });
-      var MIXL = { anchors: 'Anchor text', default_position: 'Default position (ad hoc)', 'anchors+default': 'Anchors + default', adhoc: 'Ad hoc', coordinates: 'Coordinates', template: 'Circularo template', word_template: 'Word template', detect: 'Field detection', tokens: '{{sign:n}} tokens', 'tokens+default': 'Tokens + default' };
+      var MIXL = { anchors: 'Anchor text', default_position: 'Default position (ad hoc)', 'anchors+default': 'Anchors + default', adhoc: 'Ad hoc', coordinates: 'Coordinates', template: 'Circularo template', word_template: 'Word template', detect: 'Field detection', tokens: '{{sign:n}} tokens', 'tokens+default': 'Tokens + default', tta_placer: 'Placed in TotalAgility', 'tta_placer+default': 'Placed + default' };
       var stat = function (n, label, colour, filter) {
         return '<a class="cro-card cro-stat" href="' + link('requests', 'filter=' + filter + (dash.scope === 'all' ? '&scope=all' : '')) + '"><div class="l">' + label + '</div><div class="n" style="color:' + colour + '">' + (n || 0) + '</div></a>';
       };
@@ -397,6 +402,94 @@
       };
       resetRcps();
 
+      /* --- TotalAgility placer: click on the page preview to place each recipient's fields --- */
+      S.fields = []; S.pg = 1; S.who = 1; S.ftype = 'signature'; S.pdf = null; S.img = {}; S.pdfFor = null;
+      var PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+      var loadPdfJs = function () {
+        if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+        return new Promise(function (ok, bad) {
+          var sc = document.createElement('script'); sc.src = PDFJS + 'pdf.min.js';
+          sc.onload = function () { pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; ok(pdfjsLib); };
+          sc.onerror = function () { bad(new Error('Could not load the PDF viewer.')); };
+          document.head.appendChild(sc);
+        });
+      };
+      var placing = function () { var lay = L[S.layout]; return !(lay && /^anchors/.test(lay.placement)) && S.adhocOption === 'tta_placer'; };
+      var COLORS = ['#4E3FD8', '#E8590C', '#0E9384', '#C11574', '#2E90FA', '#7A5AF8', '#B54708', '#039855'];
+      var signers = function () { return S.rcps.map(function (x, i) { return { n: i + 1, x: x }; }).filter(function (o) { return ['sign', 'approve', 'accept'].indexOf(o.x.purpose) >= 0; }); };
+      var placerHtml = function () {
+        if (!placing()) return '';
+        var body;
+        if (!S.file) body = '<div class="cro-empty">Choose the document first.</div>';
+        else if (!/\.pdf$/i.test(S.file.name)) body = '<div class="cro-note">The placer works on PDF files. For a Word file use {{sign:n}} tokens or the default position, or save it as PDF.</div>';
+        else {
+          var sg = signers(); if (!sg.some(function (o) { return o.n === S.who; }) && sg.length) S.who = sg[0].n;
+          body = '<div class="cro-ptools"><div class="cro-chips" style="margin:0">' + sg.map(function (o) {
+              var c = COLORS[(o.n - 1) % COLORS.length], cnt = S.fields.filter(function (f) { return f.recipient === o.n; }).length;
+              return '<button data-who="' + o.n + '" class="' + (S.who === o.n ? 'on' : '') + '" style="' + (S.who === o.n ? 'background:' + c + ';border-color:' + c : 'border-color:' + c + ';color:' + c) + '">#' + o.n + ' ' + esc(o.x.fullName || o.x.email || 'recipient') + ' · ' + cnt + '</button>';
+            }).join('') + '</div>' +
+            '<select class="cro-in" id="croFType" style="max-width:150px"><option value="signature"' + (S.ftype === 'signature' ? ' selected' : '') + '>Signature</option><option value="initials"' + (S.ftype === 'initials' ? ' selected' : '') + '>Initials</option></select>' +
+            '<span class="cro-pnav"><button class="cro-btn2 cro-sm" id="croPrev">‹</button> <span id="croPgLbl">Page ' + S.pg + '</span> <button class="cro-btn2 cro-sm" id="croNext">›</button></span></div>' +
+            '<div class="cro-hint" style="margin:8px 0">Choose a recipient, then click on the page where they sign. Drag a box to move it; × removes it. Signers with no box get the default position.</div>' +
+            '<div class="cro-page" id="croPage"><div class="cro-skel">Loading preview…</div></div>';
+        }
+        return '<div class="cro-card" style="margin-top:16px"><h2>Place signature fields <small>' + S.fields.length + ' placed</small></h2>' + body + '</div>';
+      };
+      var renderPage = function () {
+        var box = document.getElementById('croPage'); if (!box) return;
+        var paint = function (url) {
+          box.innerHTML = '<img src="' + url + '" draggable="false"><div class="cro-ov" id="croOv"></div>';
+          var ov = document.getElementById('croOv');
+          S.fields.forEach(function (f, i) {
+            if (f.page !== S.pg) return;
+            var c = COLORS[(f.recipient - 1) % COLORS.length], r = S.rcps[f.recipient - 1] || {};
+            var d = document.createElement('div'); d.className = 'cro-fld';
+            d.style.cssText = 'left:' + f.x * 100 + '%;top:' + f.y * 100 + '%;width:' + f.w * 100 + '%;height:' + f.h * 100 + '%;border-color:' + c + ';background:' + c + '22;color:' + c;
+            d.innerHTML = '<span>#' + f.recipient + ' ' + esc(r.fullName || '') + ' · ' + (f.type === 'initials' ? 'initials' : 'sign') + '</span><b data-rm="' + i + '">×</b>';
+            d.onmousedown = function (e) {
+              if (e.target.getAttribute('data-rm')) return;
+              e.preventDefault(); e.stopPropagation();
+              var R = ov.getBoundingClientRect(), sx = e.clientX, sy = e.clientY, ox = f.x, oy = f.y;
+              var mv = function (ev) { f.x = Math.min(1 - f.w, Math.max(0, ox + (ev.clientX - sx) / R.width)); f.y = Math.min(1 - f.h, Math.max(0, oy + (ev.clientY - sy) / R.height)); d.style.left = f.x * 100 + '%'; d.style.top = f.y * 100 + '%'; };
+              var up = function () { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+              document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+            };
+            ov.appendChild(d);
+          });
+          ov.onclick = function (e) {
+            var rm = e.target.getAttribute && e.target.getAttribute('data-rm');
+            if (rm != null) { S.fields.splice(+rm, 1); draw(); return; }
+            if (e.target !== ov) return;
+            var R = ov.getBoundingClientRect(), w = S.ftype === 'initials' ? 0.08 : 0.22, h = 0.045;
+            var x = Math.min(1 - w, Math.max(0, (e.clientX - R.left) / R.width - w / 2)), y = Math.min(1 - h, Math.max(0, (e.clientY - R.top) / R.height - h / 2));
+            S.fields.push({ recipient: S.who, page: S.pg, x: +x.toFixed(4), y: +y.toFixed(4), w: w, h: h, type: S.ftype });
+            draw();
+          };
+        };
+        if (S.img[S.pg]) return paint(S.img[S.pg]);
+        var go = S.pdf && S.pdfFor === S.file ? Promise.resolve(S.pdf) : loadPdfJs().then(function (lib) {
+          return S.file.arrayBuffer().then(function (buf) { return lib.getDocument({ data: buf }).promise; }).then(function (doc) { S.pdf = doc; S.pdfFor = S.file; S.img = {}; return doc; });
+        });
+        go.then(function (doc) {
+          if (S.pg > doc.numPages) S.pg = doc.numPages;
+          var lbl = document.getElementById('croPgLbl'); if (lbl) lbl.textContent = 'Page ' + S.pg + ' of ' + doc.numPages;
+          return doc.getPage(S.pg).then(function (page) {
+            var vp = page.getViewport({ scale: 1.4 }), cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+            return page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise.then(function () { S.img[S.pg] = cv.toDataURL('image/png'); paint(S.img[S.pg]); });
+          });
+        }).catch(function (e) { box.innerHTML = '<div class="cro-err">' + esc(e.message) + '</div>'; });
+      };
+      var wirePlacer = function () {
+        if (!placing() || !S.file || !/\.pdf$/i.test(S.file.name)) return;
+        main().querySelectorAll('[data-who]').forEach(function (b) { b.onclick = function () { S.who = +b.getAttribute('data-who'); draw(); }; });
+        var ft = document.getElementById('croFType'); if (ft) ft.onchange = function () { S.ftype = ft.value; };
+        var pv = document.getElementById('croPrev'), nx = document.getElementById('croNext');
+        if (pv) pv.onclick = function () { if (S.pg > 1) { S.pg--; draw(); } };
+        if (nx) nx.onclick = function () { if (!S.pdf || S.pg < S.pdf.numPages) { S.pg++; draw(); } };
+        if (S.pdf && S.pdfFor === S.file) { var lbl = document.getElementById('croPgLbl'); if (lbl) lbl.textContent = 'Page ' + S.pg + ' of ' + S.pdf.numPages; }
+        renderPage();
+      };
+
       var opt = function (v, label, sel, dis) { return '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + (dis ? ' disabled' : '') + '>' + esc(label) + '</option>'; };
       var roleOpts = function (cur) {
         var lay = L[S.layout]; if (!lay) return '';
@@ -441,7 +534,7 @@
               ? '<div class="cro-note">Fields are placed by anchor text in the document. Choose which field each recipient gets in the table below.</div>'
               : '<div class="cro-f"><label>Ad hoc placement</label>' + (O.adhocOptions || ['default_position']).map(function (a) {
                   var lab = { default_position: 'Default position on the last page', circularo_editor: 'Place in Circularo\'s editor', tta_placer: 'Place in TotalAgility', detect: 'Detect signature lines', tokens: '{{sign:n}} tokens' }[a] || a;
-                  var ready = a === 'default_position' || a === 'tokens';
+                  var ready = a === 'default_position' || a === 'tokens' || a === 'tta_placer';
                   return '<label class="cro-radio' + (ready ? '' : ' off') + '"><input type="radio" name="croAdhoc" value="' + a + '"' + (S.adhocOption === a ? ' checked' : '') + (ready ? '' : ' disabled') + '> ' + esc(lab) + (ready ? '' : ' <small>not built yet</small>') + '</label>';
                 }).join('') + (S.adhocOption === 'tokens' ? '<div class="cro-note" style="margin-top:8px">Put <b>{{sign:1}}</b>, <b>{{sign:2}}</b> … in the document where each recipient signs (number = row in the recipients table). Recipients without a token get the default position.</div>' : '') + '</div>') +
           '</div></div>' +
@@ -452,6 +545,7 @@
             '<datalist id="croUsers">' + USERS.map(function (u) { return '<option value="' + esc(u.email) + '">' + esc(u.full_name) + '</option>'; }).join('') + '</datalist>' +
             (mode !== 'signnow' ? '<div style="margin-top:12px;display:flex;gap:8px"><button class="cro-btn2" id="croAdd">+ Add recipient</button>' + (mode === 'theysign' && !S.rcps.some(function (x) { return x.me; }) ? '<button class="cro-btn2" id="croAddMe">+ Add me</button>' : '') + '</div>' : '') +
           '</div>' +
+          placerHtml() +
           '<div class="cro-card" style="margin-top:16px"><h2>4. Options</h2><div class="cro-grid cro-g3">' +
             '<div class="cro-f"><label>Deadline</label><input class="cro-in" type="date" id="croDeadline" value="' + esc(S.deadline) + '"></div>' +
             '<div class="cro-f"><label>Reminders</label><div class="cro-ro">' + (D.reminders && D.reminders.intervalDays ? 'Every ' + D.reminders.intervalDays + ' days, starting after ' + D.reminders.startDays + ' days' : 'Off') + '</div></div>' +
@@ -459,7 +553,7 @@
           '</div></div>' +
           '<div id="croMsg"></div>' +
           '<div class="cro-actions"><a class="cro-btn2" href="' + link('dashboard') + '">Cancel</a><button class="cro-btn" id="croGo"' + (S.busy ? ' disabled' : '') + '>' + (S.busy ? esc(S.busy) : mode === 'signnow' ? 'Prepare and sign' : 'Send for signature') + '</button></div>';
-        wire();
+        wire(); wirePlacer();
       };
       var wire = function () {
         main().querySelectorAll('[data-mode]').forEach(function (b) { b.onclick = function () { mode = b.getAttribute('data-mode'); history.replaceState(null, '', link('send', 'mode=' + mode)); resetRcps(); draw(); }; });
@@ -469,7 +563,7 @@
           if (!/\.(pdf|docx)$/i.test(f.name)) return toast('Choose a PDF or Word (.docx) file.', true);
           var max = (CFG.circularo && CFG.circularo.maxUploadMB) || 40;
           if (f.size > max * 1048576) return toast('The file is larger than ' + max + ' MB.', true);
-          S.file = f; if (!S.title) S.title = cleanTitle(f.name);
+          S.file = f; S.fields = []; S.pg = 1; S.img = {}; S.pdf = null; if (!S.title) S.title = cleanTitle(f.name);
           var base = f.name.replace(/\.[^.]+$/, '');
           if (!S.layout && L[base]) { S.layout = base; resetRcps(); toast('Layout "' + (L[base].title || base) + '" selected from the file name.'); }
           draw();
@@ -496,7 +590,7 @@
             if (redraw) draw();
           };
         });
-        main().querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { S.rcps.splice(+b.getAttribute('data-del'), 1); draw(); }; });
+        main().querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { var k = +b.getAttribute('data-del'); S.rcps.splice(k, 1); S.fields = S.fields.filter(function (f) { return f.recipient !== k + 1; }).map(function (f) { if (f.recipient > k + 1) f.recipient--; return f; }); draw(); }; });
         var add = document.getElementById('croAdd'); if (add) add.onclick = function () { var mx = S.rcps.reduce(function (m, x) { return Math.max(m, x.order || 1); }, 0); S.rcps.push(blank(S.sequential ? mx + 1 : 1)); draw(); };
         var addMe = document.getElementById('croAddMe'); if (addMe) addMe.onclick = function () { var mx = S.rcps.reduce(function (m, x) { return Math.max(m, x.order || 1); }, 0); S.rcps.push(meRow(S.sequential ? mx + 1 : 1)); draw(); };
         document.getElementById('croGo').onclick = submit;
@@ -536,7 +630,7 @@
           return cro('request_create', body).then(function (c) {
             created = set0(c)[0];
             S.busy = 'Uploading to Circularo and sharing…'; draw();
-            return cro('request_send', { requestId: created.request_id, fileName: S.file.name, fileB64: b64 });
+            return cro('request_send', { requestId: created.request_id, fileName: S.file.name, fileB64: b64, fields: placing() ? S.fields : [] });
           });
         }).then(function (res) {
           S.busy = false; S.done = { req: created, res: res, title: title, mine: S.rcps.some(function (x) { return x.me && ['sign', 'approve', 'accept'].indexOf(x.purpose) >= 0; }) }; draw();
@@ -553,7 +647,7 @@
           '<div class="cro-card cro-done"><div class="big">✓</div><h1>' + (mode === 'signnow' ? 'Ready to sign' : 'Sent for signature') + '</h1>' +
           '<p><b>' + esc(d.title) + '</b> · request ' + esc(d.req.request_id) + '</p>' +
           '<div class="cro-kv" style="max-width:460px;margin:16px auto;text-align:left">' +
-            '<span>Signature fields</span><b>' + esc(r.fields) + ' (' + esc({ anchors: 'anchor text', adhoc: 'ad hoc', 'anchors+default': 'anchors + default position', default_position: 'default position', tokens: '{{sign:n}} tokens', 'tokens+default': 'tokens + default position' }[r.placementUsed] || r.placementUsed) + ')</b>' +
+            '<span>Signature fields</span><b>' + esc(r.fields) + ' (' + esc({ anchors: 'anchor text', adhoc: 'ad hoc', 'anchors+default': 'anchors + default position', default_position: 'default position', tokens: '{{sign:n}} tokens', 'tokens+default': 'tokens + default position', tta_placer: 'placed in TotalAgility', 'tta_placer+default': 'placed + default position' }[r.placementUsed] || r.placementUsed) + ')</b>' +
             '<span>Pages</span><b>' + esc(r.pages) + '</b>' +
             '<span>Signing order</span><b>' + (r.sequential ? 'In order' : 'All at once') + '</b>' +
             '<span>Recipients</span><b>' + esc((r.shares || []).length) + '</b></div>' +

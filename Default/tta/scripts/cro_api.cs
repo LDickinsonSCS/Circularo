@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.11.0";
+        private const string VERSION = "cro-api 0.12.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -408,7 +408,7 @@ namespace Cro
         }
 
         // ---- send a draft request: upload (+anchors) -> document -> share ----
-        private static string SendRequest(object cfg, string conn, string key, string actor, long requestId, string fileName, byte[] file, ref string dbg)
+        private static string SendRequest(object cfg, string conn, string key, string actor, long requestId, string fileName, byte[] file, List<object> placed, ref string dbg)
         {
             var got = JParse(DbQuery(conn, "cro_api.request_get", "@RequestId", requestId)) as List<object>;
             var reqRows = got != null && got.Count > 0 ? got[0] as List<object> : null;
@@ -490,6 +490,8 @@ namespace Cro
                     found[id] = list;
                 }
 
+            // recipient numbers for tokens / placed fields = the order the recipients were given in (recipient_id), not the signing order
+            var byInsert = new List<long>(); foreach (var ro in rcps) byInsert.Add(Convert.ToInt64(JN(ro, "recipient_id"))); byInsert.Sort();
             // 2. recipients -> shareTo
             var byRole = new Dictionary<string, List<Dictionary<string, object>>>(StringComparer.OrdinalIgnoreCase);
             var shareTo = new Dictionary<long, string>();
@@ -506,7 +508,7 @@ namespace Cro
                             if (string.Equals(JS(uo, "email"), to, StringComparison.OrdinalIgnoreCase) && JS(uo, "circularo_username") != "") to = JS(uo, "circularo_username");
                 }
                 shareTo[rid] = to;
-                if (tokens) { string tr = "#tok" + (shareTo.Count); if (!byRole.ContainsKey(tr)) byRole[tr] = new List<Dictionary<string, object>>(); byRole[tr].Add(r); }
+                if (tokens) { string tr = "#tok" + (byInsert.IndexOf(rid) + 1); if (!byRole.ContainsKey(tr)) byRole[tr] = new List<Dictionary<string, object>>(); byRole[tr].Add(r); }
                 string role = JS(r, "anchor_id");
                 if (role == "") role = "#" + rid;
                 if (!byRole.ContainsKey(role)) byRole[role] = new List<Dictionary<string, object>>();
@@ -552,10 +554,35 @@ namespace Cro
                 }
             }
 
+            // 3b. fields placed by hand (TotalAgility placer or a calling process): [{recipient (1-based), page, x, y, w, h, type}]
+            int placedCount = 0;
+            if (placed != null && placed.Count > 0)
+            {
+                var order = byInsert;
+                foreach (var po in placed)
+                {
+                    int n = (int)JN(po, "recipient");
+                    if (n < 1 || n > order.Count) { notes.Add("placed field for unknown recipient " + n); continue; }
+                    long rid = order[n - 1];
+                    int pg = (int)JN(po, "page"); if (pg < 1) pg = 1; if (pg > pages) pg = pages;
+                    string ty = JS(po, "type"); if (ty != "initials" && ty != "stamp") ty = "signature";
+                    var f = new Dictionary<string, object>();
+                    f["user"] = new List<object> { shareTo[rid] };
+                    f["type"] = ty;
+                    f["pages"] = new List<object> { (double)pg };
+                    f["position"] = Pos(JN(po, "x"), JN(po, "y"), JN(po, "w") > 0 ? JN(po, "w") : 0.22, JN(po, "h") > 0 ? JN(po, "h") : 0.045);
+                    f["required"] = true;
+                    f["timestamp"] = ty == "signature";
+                    sigFields.Add(f);
+                    if (ty == "signature" || ty == "stamp" || ty == "initials") covered.Add(rid);
+                    placedCount++;
+                }
+            }
+
             // 4. ad hoc / fallback: default position on the last page for every signer without a field
             var dp = JO(JO(cfg, "adhoc"), "defaultPosition");
             int idx = 0;
-            string placementUsed = tokens ? "tokens" : anchors.Count > 0 ? "anchors" : "adhoc";
+            string placementUsed = tokens ? "tokens" : anchors.Count > 0 ? "anchors" : placedCount > 0 ? "tta_placer" : "adhoc";
             foreach (var ro in rcps)
             {
                 var r = ro as Dictionary<string, object>;
@@ -576,7 +603,7 @@ namespace Cro
                 f["tooltip"] = "Signature";
                 sigFields.Add(f);
                 idx++;
-                placementUsed = tokens ? (covered.Count > 0 ? "tokens+default" : "default_position") : anchors.Count > 0 ? "anchors+default" : "default_position";
+                placementUsed = tokens ? (covered.Count > 0 ? "tokens+default" : "default_position") : anchors.Count > 0 ? "anchors+default" : placedCount > 0 ? "tta_placer+default" : "default_position";
             }
 
             // 5. document
@@ -1112,7 +1139,7 @@ namespace Cro
                     if (senderName == "") senderName = "CRO Signing";
                     var created = FirstRow(DbQuery(conn, "cro_api.request_create", "@ActorId", Nz(senderId.Length == 32 ? senderId : ""), "@ActorName", senderName, "@Json", JSer(req)));
                     rid = Convert.ToInt64(JN(created, "request_id"));
-                    result = SendRequest(cfg, conn, key, actor, rid, (string)src[0], (byte[])src[1], ref dbg);
+                    result = SendRequest(cfg, conn, key, actor, rid, (string)src[0], (byte[])src[1], JL(req, "fields"), ref dbg);
                     state = "inprogress";
                 }
                 else
@@ -1342,7 +1369,7 @@ namespace Cro
                         }
                         string fn = Arg(a, "fileName", 200); if (fn == "") fn = "document.pdf";
                         byte[] bytes = Convert.FromBase64String(JS(a, "fileB64"));
-                        result = SendRequest(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), who[1] + " (" + who[0] + ")", rid, fn, bytes, ref dbg);
+                        result = SendRequest(cfg, conn, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), who[1] + " (" + who[0] + ")", rid, fn, bytes, JL(a, "fields"), ref dbg);
                         break;
                     }
                     case "request_refresh":
