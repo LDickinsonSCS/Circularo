@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.16.1";
+        private const string VERSION = "cro-api 0.17.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -676,10 +676,13 @@ namespace Cro
             docReq["definitionType"] = JS(cx, "definitionType") == "" ? "ext" : JS(cx, "definitionType");
             docReq["workflow"] = JS(cx, "workflow") == "" ? "wf_archive" : JS(cx, "workflow");
             if (JS(cx, "folderPath") != "") { var od = new Dictionary<string, object>(); od["path"] = JS(cx, "folderPath"); docReq["optionalData"] = od; }
+            bool word = ext == ".docx" || ext == ".doc";
+            if (word) docReq["convertToPDF"] = true;
             var docRes = Cx(cfg, key, "POST", "/documents", docReq, ref dbg);
             string docId = JS(docRes, "id");
             if (docId == "") { var rr = JL(docRes, "results"); if (rr != null && rr.Count > 0) docId = JS(rr[0], "documentId"); }
             if (docId == "") throw new Exception("Circularo did not return a document id.");
+            if (word) WaitForPdf(cfg, key, docId, ref dbg);
             DbQuery(conn, "cro_api.request_set_document", "@RequestId", requestId, "@DocumentId", docId, "@FileHash", hash,
                     "@PlacementUsed", placementUsed.Length > 20 ? placementUsed.Substring(0, 20) : placementUsed,
                     "@Detail", string.Join("; ", notes.ToArray()));
@@ -1293,9 +1296,12 @@ namespace Cro
             dr["definitionType"] = JS(cx, "definitionType") == "" ? "ext" : JS(cx, "definitionType");
             dr["workflow"] = JS(cx, "workflow") == "" ? "wf_archive" : JS(cx, "workflow");
             if (JS(cx, "folderPath") != "") { var od = new Dictionary<string, object>(); od["path"] = JS(cx, "folderPath"); dr["optionalData"] = od; }
+            bool word = ext == ".docx" || ext == ".doc";
+            if (word) dr["convertToPDF"] = true;
             var res = Cx(cfg, key, "POST", "/documents", dr, ref dbg);
             string docId = JS(res, "id"); if (docId == "") { var rr = JL(res, "results"); if (rr != null && rr.Count > 0) docId = JS(rr[0], "documentId"); }
             if (docId == "") throw new Exception("Circularo did not return a document id.");
+            if (word) WaitForPdf(cfg, key, docId, ref dbg);
             DbQuery(conn, "cro_api.request_set_document", "@RequestId", requestId, "@DocumentId", docId, "@FileHash", hash, "@PlacementUsed", "circularo_editor", "@Detail", "Prepared for the Circularo editor; shared for editing to " + senderUsername);
             var d = new Dictionary<string, object>(); d["sharePurpose"] = "edit"; d["shareTo"] = senderUsername;
             var sh = new Dictionary<string, object>(); sh["objectType"] = "document"; sh["type"] = docType; sh["id"] = docId; sh["data"] = new List<object> { d };
@@ -1348,6 +1354,20 @@ namespace Cro
             }
             DbQuery(conn, "cro_api.request_import_recipients", "@RequestId", requestId, "@Json", JSer(list), "@Actor", "system");
             return list.Count;
+        }
+
+        // Word uploads: ask Circularo to convert to PDF and wait until the main file is a PDF (signing needs one)
+        private static void WaitForPdf(object cfg, string key, string docId, ref string dbg)
+        {
+            for (int i = 0; i < 30; i++)
+            {
+                var dj = Cx(cfg, key, "GET", "/documents/" + Uri.EscapeDataString(docId), null, ref dbg);
+                var rl = JL(dj, "results"); var doc = rl != null && rl.Count > 0 ? rl[0] : dj;
+                var pf = JO(doc, "pdfFile"); if (pf == null) pf = JO(JO(doc, "values"), "pdfFile");
+                if (JS(pf, "fileExtension").ToLowerInvariant() == "pdf" || JS(pf, "mimetype").ToLowerInvariant().Contains("pdf")) return;
+                System.Threading.Thread.Sleep(2000);
+            }
+            throw new Exception("Circularo did not finish converting the Word file to PDF within 60 seconds.");
         }
 
         // ---- signing link for the caller (must be a recipient of the request) ----
