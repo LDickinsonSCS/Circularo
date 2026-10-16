@@ -17,7 +17,11 @@
   "senderResourceId": "<32-char TTA resource id>", // shows as the sender; needed for the sender's dashboard
   "senderName": "Jane Smith",
   "layoutKey": "03_supplier_agreement",             // anchor layout in CRO_CONFIG; omit for ad hoc
-  "placement": "anchors",                           // or "adhoc" (default position on the last page)
+  "placement": "anchors",                           // or "adhoc"
+  "adhocOption": "tokens",                          // with "adhoc": default_position | tokens ({{sign:n}} in the document, white text is fine)
+                                                    //   | detect (field above "Signed by" / "Signed on behalf of" / "Authorised signatory" / "Signature:")
+  "fields": [ { "recipient": 1, "page": 2, "x": 0.1, "y": 0.62, "w": 0.22, "h": 0.045, "type": "signature" } ],
+                                                    // optional explicit boxes (fractions of the page from top-left); recipient = position in "recipients"
   "validUntilUtc": "2026-11-30T20:00:00Z",          // default: deadlineDays from CRO_CONFIG
   "recipients": [
     { "order": 1, "kind": "internal", "email": "a@company.com", "fullName": "A", "purpose": "sign",
@@ -27,6 +31,8 @@
   ]
 }
 ```
+Recipient numbers for tokens, wording and `fields` are positions in `recipients` (1 = first). Signers without a field get the default position on the last page. For documents TotalAgility generates itself, the simplest is a layout with anchor text (e.g. `SIG_CUSTOMER` in white) or `{{sign:n}}` tokens in white.
+
 `purpose`: sign, approve, accept, review, view. `protection` (externals): email_otp or none. `internalMode`: circularo_login or as_external. Same order number = sign in parallel.
 
 ## Outputs
