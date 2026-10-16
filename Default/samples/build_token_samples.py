@@ -64,3 +64,21 @@ for i, (who, org) in enumerate([("Amira Haddad", "Northwind Trading LLC (sample)
 sec = d.sections[0]; sec.footer.paragraphs[0].text = MARK
 d.save(os.path.join(OUT, "14_adhoc_tokens.docx"))
 print("written 13_adhoc_tokens.pdf, 14_adhoc_tokens.docx")
+
+# PDF: no tokens, just the usual business wording under signature lines (for the "find signing wording" option)
+p = os.path.join(OUT, "15_adhoc_wording.pdf")
+c = canvas.Canvas(p, pagesize=A4)
+c.setFont("Helvetica-Bold", 15); c.drawString(20 * mm, H - 25 * mm, "Consultancy engagement letter (wording sample)")
+c.setFont("Helvetica", 10); y = H - 40 * mm
+for t in TEXT[:3] * 2:
+    c.drawString(20 * mm, y, t[:105]); y -= 6 * mm
+    if len(t) > 105: c.drawString(20 * mm, y, t[105:]); y -= 6 * mm
+    y -= 3 * mm
+for i, (lbl, who) in enumerate([("Signed on behalf of Northwind Trading LLC (sample)", "Amira Haddad, Director"), ("Signed by", "Tom Becker, Consultant")]):
+    top = H - 150 * mm - i * 45 * mm
+    c.line(20 * mm, top, 95 * mm, top)
+    c.setFont("Helvetica", 10); c.drawString(20 * mm, top - 6 * mm, lbl)
+    c.drawString(20 * mm, top - 12 * mm, who)
+c.setFont("Helvetica", 7); c.setFillColor(colors.grey); c.drawString(20 * mm, 10 * mm, MARK)
+c.showPage(); c.save()
+print("written 15_adhoc_wording.pdf")
