@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.18.1";
+        private const string VERSION = "cro-api 0.19.0";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -1448,7 +1448,7 @@ namespace Cro
             string body = Fill(JS(rc, "body") != "" ? JS(rc, "body") :
                 "<p>Dear {name},</p><p>{sender} is waiting for you to {action} <b>{title}</b>{deadline_text}.</p><p><a href='{url}'>Open the document in Circularo</a></p><p>{howto}</p><p style='color:#667085;font-size:12px'>Sent by CRO e-Signing (TotalAgility).</p>", v)
                 .Replace("{deadline_text}", deadline == "" ? "" : " by " + HtmlEnc(deadline));
-            TtaMail(session, JS(rc, "from"), JS(r, "email"), subject, body);
+            SendMail(cfg, conn, session, new List<string> { JS(r, "email") }, subject, body, ref dbg);
             DbQuery(conn, "cro_api.reminder_mark", "@RecipientId", Convert.ToInt64(JN(r, "recipient_id")), "@Outcome", "ok", "@Detail", JS(r, "email") + " (" + link[1] + ")", "@Actor", actor);
             return "ok: " + JS(r, "email");
         }
@@ -1468,6 +1468,132 @@ namespace Cro
                 }
             }
             return sent + " sent, " + failed + " failed";
+        }
+
+        // ---- secrets in the encrypted store (DPAPI), entered once in a secure server variable ----
+        private static string StoredSecret(string conn, string systemSession, string name, string varId, ref string dbg)
+        {
+            try
+            {
+                var row = FirstRow(DbQuery(conn, "cro_api.secret_get", "@Name", name));
+                if (row != null) { string v = Encoding.UTF8.GetString(Dpapi(false, Convert.FromBase64String(JS(row, "protected_b64")))); if (v.Length > 0) return v; }
+            }
+            catch (Exception e) { dbg += "Secret store: " + Inner(e) + " "; }
+            string plain = SecureVar(systemSession, varId);
+            if (plain.Length == 0) throw new Exception(varId + " is not set (enter it, then run key_migrate with {name:'" + name + "'}).");
+            return plain;
+        }
+
+        // ---- email: Microsoft Graph (app registration, Mail.Send) or the TotalAgility mail settings ----
+        private static string[] HttpBearer(string method, string url, string body, string bearer, int timeoutSec)
+        {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+            var req = (HttpWebRequest)WebRequest.Create(url);
+            req.Method = method; req.Timeout = timeoutSec * 1000; req.Accept = "application/json"; req.UserAgent = VERSION;
+            req.Headers["Authorization"] = "Bearer " + bearer;
+            if (body != null)
+            {
+                var bytes = Encoding.UTF8.GetBytes(body);
+                req.ContentType = "application/json; charset=utf-8"; req.ContentLength = bytes.Length;
+                using (var st = req.GetRequestStream()) st.Write(bytes, 0, bytes.Length);
+            }
+            HttpWebResponse resp;
+            try { resp = (HttpWebResponse)req.GetResponse(); }
+            catch (WebException we) { resp = we.Response as HttpWebResponse; if (resp == null) return new[] { "0", we.Message }; }
+            using (resp) using (var rd = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                return new[] { ((int)resp.StatusCode).ToString(CultureInfo.InvariantCulture), rd.ReadToEnd() };
+        }
+        private static void SendMail(object cfg, string conn, string session, List<string> to, string subject, string html, ref string dbg)
+        {
+            var mc = JO(cfg, "mail");
+            string provider = JS(mc, "provider") == "" ? "tta" : JS(mc, "provider");
+            if (to == null || to.Count == 0) throw new Exception("No recipient for the email.");
+            if (provider == "graph")
+            {
+                var g = JO(mc, "graph");
+                string tenant = JS(g, "tenantId"), client = JS(g, "clientId"), sender = JS(g, "sender");
+                if (tenant == "" || client == "" || sender == "") throw new Exception("mail.graph tenantId, clientId and sender must be set in CRO_CONFIG.");
+                string secret = StoredSecret(conn, session, "graph_client_secret", "CRO_GRAPH_SECRET", ref dbg);
+                string form = "client_id=" + Uri.EscapeDataString(client) + "&client_secret=" + Uri.EscapeDataString(secret)
+                            + "&scope=" + Uri.EscapeDataString("https://graph.microsoft.com/.default") + "&grant_type=client_credentials";
+                var tr = Http("POST", "https://login.microsoftonline.com/" + Uri.EscapeDataString(tenant) + "/oauth2/v2.0/token", form, "application/x-www-form-urlencoded", 30);
+                string token = JS(JParse(tr[1]), "access_token");
+                if (token == "") { var tj = JParse(tr[1]); throw new Exception("Graph token " + tr[0] + ": " + JS(tj, "error") + " " + (JS(tj, "error_description").Length > 200 ? JS(tj, "error_description").Substring(0, 200) : JS(tj, "error_description"))); }
+                var msg = new Dictionary<string, object>(); msg["subject"] = subject;
+                var bd = new Dictionary<string, object>(); bd["contentType"] = "HTML"; bd["content"] = html; msg["body"] = bd;
+                var rl = new List<object>();
+                foreach (var t in to) { var ea = new Dictionary<string, object>(); ea["address"] = t; var rr = new Dictionary<string, object>(); rr["emailAddress"] = ea; rl.Add(rr); }
+                msg["toRecipients"] = rl;
+                var payload = new Dictionary<string, object>(); payload["message"] = msg; payload["saveToSentItems"] = JS(g, "saveToSentItems").ToLowerInvariant() == "true";
+                var sr = HttpBearer("POST", "https://graph.microsoft.com/v1.0/users/" + Uri.EscapeDataString(sender) + "/sendMail", JSer(payload), token, 30);
+                if (sr[0] != "202" && sr[0] != "200") throw new Exception("Graph sendMail " + sr[0] + ": " + (sr[1].Length > 300 ? sr[1].Substring(0, 300) : sr[1]));
+                return;
+            }
+            foreach (var t in to) TtaMail(session, JS(mc, "from"), t, subject, html);
+        }
+
+        // ---- access: TotalAgility users need a Circularo account to use the CRO pages ----
+        private static Dictionary<string, object> AccessCheck(object cfg, string conn, string session, string[] who, ref string dbg)
+        {
+            var res = new Dictionary<string, object>();
+            bool admin = IsAdmin(cfg, who[0]); res["admin"] = admin;
+            string em = CallerEmail(conn, session, who[0], ref dbg); res["email"] = em;
+            var ac = JO(cfg, "access");
+            bool require = JS(ac, "requireCircularoAccount").ToLowerInvariant() != "false";
+            Dictionary<string, object> rec = null;
+            foreach (var u in FirstSet(DbQuery(conn, "cro_api.user_list")))
+                if (string.Equals(JS(u, "tta_resource_id"), who[0], StringComparison.OrdinalIgnoreCase) || (em != "" && string.Equals(JS(u, "email"), em, StringComparison.OrdinalIgnoreCase))) { rec = u as Dictionary<string, object>; if (JS(u, "tta_resource_id") != "") break; }
+            string st = rec == null ? "" : JS(rec, "status");
+            if (rec != null && (st == "active" || st == "invited"))
+            {
+                res["allowed"] = true; res["status"] = st; res["circularoUsername"] = JS(rec, "circularo_username");
+                if (JS(rec, "tta_resource_id") == "") DbQuery(conn, "cro_api.user_upsert", "@ActorId", who[0], "@ActorName", who[1], "@TtaResourceId", who[0], "@Email", JS(rec, "email"), "@FullName", JS(rec, "full_name"), "@Role", JS(rec, "circularo_role"));
+                return res;
+            }
+            if (rec != null && st == "suspended") { res["allowed"] = admin; res["status"] = st; res["reason"] = "Your Circularo account is suspended."; return res; }
+            string key = ApiKey(conn, session, ref dbg);
+            if (em != "")
+            {
+                // first visit: look for an account with this email in Circularo and link it
+                foreach (var c in CxUsers(cfg, key, ref dbg))
+                    if (string.Equals(JS(c, "mail"), em, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string cs = JS(c, "status") == "suspended" ? "suspended" : JS(c, "status") == "newly_created" ? "invited" : "active";
+                        var row = FirstRow(DbQuery(conn, "cro_api.user_upsert", "@ActorId", who[0], "@ActorName", who[1], "@TtaResourceId", who[0], "@Email", em, "@FullName", JS(c, "fullname") != "" ? JS(c, "fullname") : who[1], "@Role", "sign"));
+                        DbQuery(conn, "cro_api.user_set_circularo", "@UserId", Convert.ToInt64(JN(row, "user_id")), "@Status", cs, "@CircularoUserId", Nz(JS(c, "id")), "@CircularoUsername", Nz(JS(c, "name")), "@Actor", "access check");
+                        res["allowed"] = cs != "suspended" || admin; res["status"] = cs; res["circularoUsername"] = JS(c, "name"); res["linked"] = true;
+                        if (cs == "suspended") res["reason"] = "Your Circularo account is suspended.";
+                        return res;
+                    }
+                // optional: create the account automatically for agreed email domains
+                var auto = JO(ac, "autoCreate");
+                if (JS(auto, "enabled").ToLowerInvariant() == "true")
+                {
+                    string dom = em.Substring(em.IndexOf('@') + 1).ToLowerInvariant(); bool ok = false;
+                    foreach (var d in (JL(auto, "domains") ?? new List<object>())) if (string.Equals(Convert.ToString(d).Trim().TrimStart('@'), dom, StringComparison.OrdinalIgnoreCase)) ok = true;
+                    if (ok)
+                    {
+                        string role = JS(auto, "role") == "" ? "sign" : JS(auto, "role");
+                        var row = FirstRow(DbQuery(conn, "cro_api.user_upsert", "@ActorId", who[0], "@ActorName", who[1], "@TtaResourceId", who[0], "@Email", em, "@FullName", who[1], "@Role", role));
+                        long uid = Convert.ToInt64(JN(row, "user_id"));
+                        var org = CxOrg(cfg, key, ref dbg);
+                        string gid = JS(JO(org, "groups"), role); if (gid == "") gid = JS(JO(org, "groups"), "user");
+                        var u = new Dictionary<string, object>(); u["fullname"] = who[1]; u["mail"] = em; u["name"] = em; u["organization"] = JS(org, "organization");
+                        u["group"] = new List<object> { JS(org, "organization"), gid }; u["status"] = "newly_created";
+                        var body = new Dictionary<string, object>(); body["sendMail"] = true; body["users"] = new List<object> { u };
+                        Cx(cfg, key, "POST", "/users", body, ref dbg);
+                        DbQuery(conn, "cro_api.user_set_circularo", "@UserId", uid, "@Status", "invited", "@CircularoUsername", em, "@Actor", "access check (auto-create " + dom + ")");
+                        res["allowed"] = true; res["status"] = "invited"; res["autoCreated"] = true; res["circularoUsername"] = em;
+                        return res;
+                    }
+                }
+            }
+            res["status"] = "none";
+            res["allowed"] = admin || !require;
+            res["reason"] = em == "" ? "Your TotalAgility user has no email address, so it cannot be matched to a Circularo account." : "There is no Circularo account for " + em + ".";
+            try { var pend = FirstSet(DbQuery(conn, "cro_api.access_request_list", "@Status", "pending", "@ResourceId", who[0])); res["pendingRequest"] = pend.Count > 0 ? (object)JS(pend[0], "requested_utc") : null; }
+            catch (Exception ex) { dbg += "access requests: " + Inner(ex) + " "; }
+            return res;
         }
 
         // ---- signing link for the caller (must be a recipient of the request) ----
@@ -1605,14 +1731,17 @@ namespace Cro
                     {
                         // Moves the key from the secure variable into the encrypted store. Admins only.
                         if (!IsAdmin(cfg, who[0])) { DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "key_migrate", "@Outcome", "refused", "@Detail", "Not a CRO administrator"); throw new Exception("Only CRO administrators can do this."); }
-                        string plain = SecureVar(In(sp, "SPP_SYSTEM_SESSION_ID"), "CRO_API_KEY");
-                        if (plain.Length < 16) throw new Exception("CRO_API_KEY is empty: enter the key there first.");
+                        // ARGS: { name: "circularo" (default) | "graph" }
+                        string which = Arg(a, "name", 20).ToLowerInvariant() == "graph" ? "graph" : "circularo";
+                        string varId = which == "graph" ? "CRO_GRAPH_SECRET" : "CRO_API_KEY", secName = which == "graph" ? "graph_client_secret" : "circularo_api_key";
+                        string plain = SecureVar(In(sp, "SPP_SYSTEM_SESSION_ID"), varId);
+                        if (plain.Length < (which == "graph" ? 8 : 16)) throw new Exception(varId + " is empty: enter the value there first.");
                         string b64 = Convert.ToBase64String(Dpapi(true, Encoding.UTF8.GetBytes(plain)));
                         if (Encoding.UTF8.GetString(Dpapi(false, Convert.FromBase64String(b64))) != plain) throw new Exception("Encryption round-trip check failed.");
                         string fp = Fingerprint(plain);
-                        DbQuery(conn, "cro_api.secret_set", "@Name", "circularo_api_key", "@ProtectedB64", b64, "@Fingerprint", fp,
+                        DbQuery(conn, "cro_api.secret_set", "@Name", secName, "@ProtectedB64", b64, "@Fingerprint", fp,
                                 "@ValueLength", plain.Length, "@MachineName", Environment.MachineName, "@Actor", who[1] + " (" + who[0] + ")");
-                        result = "{\"stored\":true,\"fingerprint\":" + JQ(fp) + ",\"length\":" + plain.Length + ",\"machine\":" + JQ(Environment.MachineName) + "}";
+                        result = "{\"stored\":true,\"secret\":" + JQ(secName) + ",\"fingerprint\":" + JQ(fp) + ",\"length\":" + plain.Length + ",\"machine\":" + JQ(Environment.MachineName) + "}";
                         break;
                     }
                     case "key_status":
@@ -2063,6 +2192,113 @@ namespace Cro
                         }
                         DbQuery(conn, "cro_api.audit_write", "@Actor", who[1] + " (" + who[0] + ")", "@Action", "recipient_links", "@Outcome", "ok", "@RequestId", rid, "@Detail", outl.Count + " link(s)");
                         result = JSer(outl);
+                        break;
+                    }
+                    case "mail_test":
+                    {
+                        // Admin: send a test email to ARGS.to (default: the caller) with the configured provider
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        string to = Arg(a, "to", 254); if (to == "") to = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
+                        SendMail(cfg, conn, In(sp, "SPP_SYSTEM_SESSION_ID"), new List<string> { to }, "CRO e-Signing test email", "<p>This is a test email from CRO e-Signing (" + VERSION + ").</p>", ref dbg);
+                        result = "{\"sent\":true,\"to\":" + JQ(to) + ",\"provider\":" + JQ(JS(JO(cfg, "mail"), "provider")) + "}";
+                        break;
+                    }
+                    case "access_check":
+                        result = JSer(AccessCheck(cfg, conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who, ref dbg));
+                        break;
+                    case "access_request":
+                    {
+                        // ARGS: { note }  A TotalAgility user without a Circularo account asks the CRO administrators for one.
+                        string em = CallerEmail(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), who[0], ref dbg);
+                        var row = FirstRow(DbQuery(conn, "cro_api.access_request_add", "@ResourceId", who[0], "@FullName", who[1], "@Email", Nz(em), "@Note", Nz(Arg(a, "note", 1000))));
+                        bool mailed = false;
+                        var admins = new List<string>(); foreach (var x in (JL(JO(cfg, "access"), "adminEmails") ?? new List<object>())) if (Convert.ToString(x).Contains("@")) admins.Add(Convert.ToString(x));
+                        if (JS(row, "is_new") == "1" && admins.Count > 0)
+                        {
+                            try
+                            {
+                                SendMail(cfg, conn, In(sp, "SPP_SYSTEM_SESSION_ID"), admins, "CRO e-Signing: account requested by " + who[1],
+                                    "<p>" + HtmlEnc(who[1]) + " (" + HtmlEnc(em == "" ? "no email in TotalAgility" : em) + ") has asked for a Circularo account to use CRO e-Signing.</p>"
+                                    + (Arg(a, "note", 1000) != "" ? "<p>Note: " + HtmlEnc(Arg(a, "note", 1000)) + "</p>" : "") + "<p>Open the CRO Users page to invite or decline.</p>", ref dbg);
+                                mailed = true;
+                            }
+                            catch (Exception ex) { dbg += "admin email: " + Inner(ex) + " "; }
+                        }
+                        result = "{\"requestId\":" + JS(row, "access_request_id") + ",\"requested\":" + JQ(JS(row, "requested_utc")) + ",\"adminsEmailed\":" + (mailed ? "true" : "false") + "}";
+                        break;
+                    }
+                    case "access_requests":
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        result = DbQuery(conn, "cro_api.access_request_list", "@Status", Nz(Arg(a, "status", 10)));
+                        break;
+                    case "access_request_handle":
+                    {
+                        // Admin. ARGS: { id, action: "invite"|"decline", role }
+                        if (!IsAdmin(cfg, who[0])) throw new Exception("Only CRO administrators can do this.");
+                        int arid; if (!int.TryParse(Arg(a, "id", 10), out arid)) throw new Exception("id is required.");
+                        string act = Arg(a, "action", 10).ToLowerInvariant();
+                        DbQuery(conn, "cro_api.access_request_set", "@AccessRequestId", arid, "@Status", act == "decline" ? "declined" : "done", "@Actor", who[1] + " (" + who[0] + ")");
+                        result = "{\"id\":" + arid + ",\"status\":" + JQ(act == "decline" ? "declined" : "done") + "}";
+                        break;
+                    }
+                    case "contact_list":
+                        result = DbQuery(conn, "cro_api.contact_list", "@ResourceId", who[0], "@Search", Nz(Arg(a, "search", 100)));
+                        break;
+                    case "contact_save":
+                    {
+                        // ARGS: { contacts:[{ email, fullName, company, phone, language }], shared }  Saved in CRO and as Circularo contacts shared with the caller.
+                        var list = JL(a, "contacts") ?? new List<object> { a };
+                        string uname = "";
+                        foreach (var u in FirstSet(DbQuery(conn, "cro_api.user_list")))
+                            if (string.Equals(JS(u, "tta_resource_id"), who[0], StringComparison.OrdinalIgnoreCase)) uname = JS(u, "circularo_username");
+                        string key = ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg);
+                        bool shared = JS(a, "shared").ToLowerInvariant() == "true" && IsAdmin(cfg, who[0]);
+                        var outl = new List<object>();
+                        foreach (var co in list)
+                        {
+                            string email = JS(co, "email").Trim().ToLowerInvariant(); if (email == "") continue;
+                            var row = FirstRow(DbQuery(conn, "cro_api.contact_save", "@ResourceId", who[0], "@OwnerName", who[1], "@Email", email, "@FullName", Nz(JS(co, "fullName")),
+                                                       "@Company", Nz(JS(co, "company")), "@Phone", Nz(JS(co, "phone")), "@Language", Nz(JS(co, "language")), "@Shared", shared));
+                            var e = new Dictionary<string, object>(); e["contactId"] = JN(row, "contact_id"); e["email"] = email;
+                            if (JS(row, "circularo_contact_id") == "")
+                            {
+                                try
+                                {
+                                    var d = new Dictionary<string, object>(); d["mail"] = email;
+                                    if (JS(co, "fullName") != "") d["fullname"] = JS(co, "fullName");
+                                    if (JS(co, "company") != "") d["company"] = JS(co, "company");
+                                    if (JS(co, "phone") != "") d["phone"] = JS(co, "phone");
+                                    if (JS(co, "language") != "") d["language"] = JS(co, "language");
+                                    var body = new Dictionary<string, object>(); body["data"] = d;
+                                    string cid = JS(Cx(cfg, key, "POST", "/contacts", body, ref dbg), "id");
+                                    if (cid != "")
+                                    {
+                                        DbQuery(conn, "cro_api.contact_set_circularo", "@ContactId", (int)JN(row, "contact_id"), "@CircularoContactId", cid);
+                                        e["circularoContactId"] = cid;
+                                        if (uname != "")
+                                        {
+                                            var sh = new Dictionary<string, object>(); sh["ids"] = new List<object> { cid }; sh["usersToAdd"] = new List<object> { uname }; sh["allowEdit"] = true;
+                                            Cx(cfg, key, "PUT", "/contacts/share", sh, ref dbg); e["sharedWith"] = uname;
+                                        }
+                                    }
+                                }
+                                catch (Exception ex) { e["circularoError"] = Inner(ex); }
+                            }
+                            outl.Add(e);
+                        }
+                        result = JSer(outl);
+                        break;
+                    }
+                    case "contact_delete":
+                    {
+                        // ARGS: { contactId }  Owner (or admin). Also removed from Circularo.
+                        int cid; if (!int.TryParse(Arg(a, "contactId", 10), out cid)) throw new Exception("contactId is required.");
+                        var row = FirstRow(DbQuery(conn, "cro_api.contact_delete", "@ContactId", cid, "@ResourceId", who[0], "@Force", IsAdmin(cfg, who[0])));
+                        string ccid = JS(row, "circularo_contact_id");
+                        if (ccid != "")
+                            try { var body = new Dictionary<string, object>(); body["ids"] = new List<object> { ccid }; Cx(cfg, ApiKey(conn, In(sp, "SPP_SYSTEM_SESSION_ID"), ref dbg), "DELETE", "/contacts", body, ref dbg); }
+                            catch (Exception ex) { dbg += "circularo contact delete: " + Inner(ex) + " "; }
+                        result = "{\"deleted\":" + cid + "}";
                         break;
                     }
                     case "user_list":

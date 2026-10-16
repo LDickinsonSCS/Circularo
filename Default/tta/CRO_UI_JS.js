@@ -4,7 +4,7 @@
    All data comes from the synchronous CRO API process; the caller is identified on the server. */
 (function () {
   if (window.__croUi) return; window.__croUi = 1;
-  var VERSION = 'cro-ui 0.8.1';
+  var VERSION = 'cro-ui 0.9.0';
   var API_ID = '66799B626B1B411EB6FFFA0D0EF5270C';           // CRO API (synchronous)
   var BASE = location.pathname.split(/\/forms\//i)[0];
   var FORMS = (function () { var m = /^(.*?\/forms\/(?:[^\/]+\/)?)[^\/]+\.form$/i.exec(location.pathname); return m ? m[1] : BASE + '/Forms/'; })();
@@ -381,8 +381,9 @@
   var renderSend = function () {
     var mode = MODES[q('mode')] ? q('mode') : 'theysign';
     main().innerHTML = '<div class="cro-skel">Loading…</div>';
-    Promise.all([cro('me', {}), cro('config', {}), cro('user_list', {}).catch(function () { return [[]]; })]).then(function (r) {
-      var ME = r[0], CFG = r[1], USERS = set0(r[2]);
+    Promise.all([cro('me', {}), cro('config', {}), cro('user_list', {}).catch(function () { return [[]]; }), cro('contact_list', {}).catch(function () { return [[]]; })]).then(function (r) {
+      var ME = r[0], CFG = r[1], USERS = set0(r[2]), CONTACTS = set0(r[3]);
+      var isContact = function (em) { em = String(em || '').trim().toLowerCase(); return CONTACTS.some(function (c) { return c.email === em; }); };
       var D = CFG.defaults || {}, O = CFG.options || {}, L = CFG.layouts || {};
       var dl = new Date(Date.now() + (D.deadlineDays || 14) * 864e5);
       var S = { file: null, title: '', layout: '', adhocOption: D.adhocOption || 'default_position', sequential: D.sequential !== false,
@@ -515,7 +516,7 @@
         return '<tr data-i="' + i + '"><td class="cro-sub" title="Recipient number (for {{sign:n}} tokens)">' + (i + 1) + '</td>' +
           (showOrder() ? '<td><input class="cro-in" style="width:56px" type="number" min="1" max="20" data-k="order" value="' + esc(x.order) + '"></td>' : '') +
           '<td><input class="cro-in" data-k="fullName" placeholder="Full name" value="' + esc(x.fullName) + '"' + (lock ? ' disabled' : '') + '></td>' +
-          '<td><input class="cro-in" data-k="email" list="croUsers" placeholder="name@company.com" value="' + esc(x.email) + '"' + (lock ? ' disabled' : '') + '>' + (lock ? '<div class="cro-hint">You</div>' : '') + '</td>' +
+          '<td><input class="cro-in" data-k="email" list="croUsers" placeholder="name@company.com" value="' + esc(x.email) + '"' + (lock ? ' disabled' : '') + '>' + (lock ? '<div class="cro-hint">You</div>' : ext && /@/.test(x.email || '') ? (isContact(x.email) ? '<div class="cro-hint">In your contacts</div>' : '<label class="cro-hint" style="display:block;color:var(--cro-sub)"><input type="checkbox" data-save="' + i + '"' + (x.saveContact ? ' checked' : '') + '> Save to my contacts</label>') : '') + '</td>' +
           '<td><select class="cro-in" data-k="kind"' + (lock ? ' disabled' : '') + '>' + opt('internal', 'Internal', !ext) + opt('external', 'External', ext) + '</select></td>' +
           '<td><select class="cro-in" data-k="purpose">' + (O.purposes || ['sign']).map(function (p) { return opt(p, PURPOSES[p] || p, x.purpose === p); }).join('') + '</select></td>' +
           '<td>' + (ext
@@ -556,7 +557,7 @@
             (mode !== 'signnow' ? '<label class="cro-check"><input type="checkbox" id="croSeq"' + (S.sequential ? ' checked' : '') + '> Signing order (same number = sign in parallel)</label>' : '') +
             '<table class="cro-table cro-rcp"><tr><th>#</th>' + (showOrder() ? '<th>Order</th>' : '') + '<th>Name</th><th>Email</th><th>Type</th><th>Action</th><th>Security</th>' + (lay ? '<th>Field</th>' : '') + '<th></th></tr>' +
             S.rcps.map(rowHtml).join('') + '</table>' +
-            groupsHtml() + '<datalist id="croUsers">' + USERS.map(function (u) { return '<option value="' + esc(u.email) + '">' + esc(u.full_name) + '</option>'; }).join('') + '</datalist>' +
+            groupsHtml() + '<datalist id="croUsers">' + USERS.map(function (u) { return '<option value="' + esc(u.email) + '">' + esc(u.full_name) + ' (internal)</option>'; }).join('') + CONTACTS.map(function (c) { return '<option value="' + esc(c.email) + '">' + esc((c.full_name || c.email) + (c.company ? ' · ' + c.company : '') + ' (contact)') + '</option>'; }).join('') + '</datalist>' +
             (mode !== 'signnow' ? '<div style="margin-top:12px;display:flex;gap:8px"><button class="cro-btn2" id="croAdd">+ Add recipient</button>' + (mode === 'theysign' && !S.rcps.some(function (x) { return x.me; }) ? '<button class="cro-btn2" id="croAddMe">+ Add me</button>' : '') + '</div>' : '') +
           '</div>' +
           placerHtml() +
@@ -609,10 +610,14 @@
             if (k === 'email' && el.value) {
               var u = USERS.filter(function (u) { return u.email.toLowerCase() === el.value.trim().toLowerCase(); })[0];
               if (u && (x.kind !== 'internal' || !x.fullName)) { x.kind = 'internal'; if (!x.fullName) x.fullName = u.full_name; redraw = true; }
+              var ct = CONTACTS.filter(function (c) { return c.email === el.value.trim().toLowerCase(); })[0];
+              if (!u && ct) { x.kind = 'external'; if (!x.fullName) x.fullName = ct.full_name || ''; x.saveContact = false; redraw = true; }
+              if (!u && !ct) redraw = true;
             }
             if (redraw) draw();
           };
         });
+        main().querySelectorAll('[data-save]').forEach(function (c) { c.onchange = function () { S.rcps[+c.getAttribute('data-save')].saveContact = c.checked; }; });
         main().querySelectorAll('[data-del]').forEach(function (b) { b.onclick = function () { var k = +b.getAttribute('data-del'); S.rcps.splice(k, 1); S.fields = S.fields.filter(function (f) { return f.recipient !== k + 1; }).map(function (f) { if (f.recipient > k + 1) f.recipient--; return f; }); draw(); }; });
         var add = document.getElementById('croAdd'); if (add) add.onclick = function () { var mx = S.rcps.reduce(function (m, x) { return Math.max(m, x.order || 1); }, 0); S.rcps.push(blank(S.sequential ? mx + 1 : 1)); draw(); };
         var addMe = document.getElementById('croAddMe'); if (addMe) addMe.onclick = function () { var mx = S.rcps.reduce(function (m, x) { return Math.max(m, x.order || 1); }, 0); S.rcps.push(meRow(S.sequential ? mx + 1 : 1)); draw(); };
@@ -668,6 +673,8 @@
             return cro('request_send', { requestId: created.request_id, fileName: S.file.name, fileB64: b64, fields: placing() ? S.fields : [], options: body.options });
           });
         }).then(function (res) {
+          var keep = S.rcps.filter(function (x) { return x.kind === 'external' && x.saveContact && !isContact(x.email); }).map(function (x) { return { email: x.email.trim().toLowerCase(), fullName: x.fullName || '' }; });
+          if (keep.length) cro('contact_save', { contacts: keep }).then(function () { toast(keep.length + ' contact(s) saved.'); }).catch(function (e) { toast('Contacts not saved: ' + e.message, true); });
           S.busy = false; S.done = { req: created, res: res, title: title, mine: S.rcps.some(function (x) { return x.me && ['sign', 'approve', 'accept'].indexOf(x.purpose) >= 0; }) }; draw();
         }).catch(function (e) {
           S.busy = false; draw();
@@ -867,7 +874,8 @@
       .then(function (l) { tta = (l || []).filter(function (r) { return r.EmailAddress; }).map(function (r) { return { id: r.Identity.Id, name: r.Identity.Name, email: String(r.EmailAddress).toLowerCase() }; }); })
       .catch(function () { tta = []; });
     var load = function () {
-      return Promise.all([cro('users_overview', {}), ttaP]).then(function (r) {
+      return Promise.all([cro('users_overview', {}), ttaP, cro('access_requests', { status: 'pending' }).catch(function () { return [[]]; })]).then(function (r) {
+        var AR = set0(r[2]);
         var d = r[0], recs = set0(d.records), cx = d.circularo || [], org = d.org || {}, G = org.groups || {};
         var roleOf = function (groups) { for (var k in G) if ((groups || []).indexOf(G[k]) >= 0 && k !== 'user') return k; return (groups || []).indexOf(G.user) >= 0 ? 'user' : ''; };
         var ttaBy = function (id, email) { return tta.filter(function (t) { return (id && t.id === id) || (!id && email && t.email === email.toLowerCase()); })[0]; };
@@ -881,6 +889,9 @@
         main().innerHTML =
           '<div class="cro-h1"><h1>Users</h1><div class="ctl"><button class="cro-btn2" id="croReload">Refresh</button></div></div>' +
           '<p class="cro-lead">TotalAgility manages the Circularo accounts of internal signers. External signers need no account.</p>' +
+          (AR.length ? '<div class="cro-card" style="margin-bottom:16px;border-color:#FEC84B"><h2>Access requests <small>' + AR.length + ' waiting</small></h2><table class="cro-table cro-list"><tr><th>Person</th><th>Asked</th><th>Note</th><th></th></tr>' +
+            AR.map(function (q, i) { return '<tr><td><b>' + esc(q.full_name) + '</b><div class="cro-sub">' + esc(q.email || 'no email in TotalAgility') + '</div></td><td title="' + esc(when(q.requested_utc)) + '">' + esc(ago(q.requested_utc)) + '</td><td>' + esc(q.note || '') + '</td>' +
+              '<td style="text-align:right;white-space:nowrap">' + (q.email ? '<button class="cro-btn cro-sm" data-arinv="' + i + '">Invite to Circularo</button> ' : '') + '<button class="cro-btn2 cro-sm" data-ardec="' + i + '">Decline</button></td></tr>'; }).join('') + '</table></div>' : '') +
           '<div class="cro-card"><h2>People <small>' + rows.length + '</small></h2>' +
           '<table class="cro-table cro-list"><tr><th>Person</th><th>TotalAgility user</th><th>Circularo account</th><th>Role</th><th>Status</th><th></th></tr>' +
           rows.map(function (x, i) {
@@ -908,6 +919,16 @@
           '</div><div class="cro-note">Invite creates the Circularo account and Circularo emails the person to set a password. If an account with this email already exists it is linked instead. "Record only" keeps the person in CRO without touching Circularo.</div>' +
           '<div class="cro-actions"><button class="cro-btn2" data-save="record">Record only</button><button class="cro-btn" data-save="invite">Save and invite</button></div></div>' +
           (org.organization ? '<div class="cro-foot" style="text-align:left;padding:12px 0">Circularo organization <span class="cro-mono">' + esc(org.organization) + '</span></div>' : '');
+        main().querySelectorAll('[data-arinv]').forEach(function (b) {
+          b.onclick = function () {
+            var q = AR[+b.getAttribute('data-arinv')];
+            busy(b, cro('user_save', { email: q.email, fullName: q.full_name, role: 'sign', ttaResourceId: q.resource_id, action: 'invite' }).then(function (res) { return cro('access_request_handle', { id: q.access_request_id, action: 'invite' }).then(function () { return res; }); }))
+              .then(function (res) { if (res) toast(res.linked ? 'Linked to the existing Circularo account.' : 'Invitation sent by Circularo.'); });
+          };
+        });
+        main().querySelectorAll('[data-ardec]').forEach(function (b) {
+          b.onclick = function () { var q = AR[+b.getAttribute('data-ardec')]; busy(b, cro('access_request_handle', { id: q.access_request_id, action: 'decline' })).then(function () { toast('Request declined.'); }); };
+        });
         document.getElementById('croReload').onclick = function () { main().innerHTML = '<div class="cro-skel">Loading…</div>'; load().catch(fail); };
         var sel = document.getElementById('croTta');
         sel.onchange = function () { var t = tta.filter(function (x) { return x.id === sel.value; })[0]; if (t) { document.getElementById('croUName').value = t.name; document.getElementById('croUMail').value = t.email; } };
@@ -956,11 +977,34 @@
   shell();
   tokP = null;
   cro('whoami', {}).then(function (u) { var el = document.getElementById('croMe'); if (el) el.textContent = u.name || ''; }).catch(function () { });
-  ({
+  var renderGate = function (a) {
+    main().innerHTML = '<div class="cro-card cro-done"><div class="big" style="background:#FEF0C7;color:#B54708">!</div><h1>A Circularo account is needed</h1>' +
+      '<p>' + esc(a.reason || 'Your user has no Circularo account.') + '</p><p class="cro-sub">CRO e-Signing uses your own Circularo account to sign and send documents.</p>' +
+      (a.pendingRequest ? '<p><b>Your request was sent to the administrators ' + esc(ago(a.pendingRequest)) + '.</b> You will get an email from Circularo when your account is ready.</p>'
+        : '<div class="cro-f" style="max-width:460px;margin:12px auto;text-align:left"><label>Note to the administrators (optional)</label><textarea class="cro-in" id="croNote" rows="2" maxlength="900"></textarea></div>' +
+          '<div class="cro-actions" style="justify-content:center"><button class="cro-btn" id="croAsk">Ask an administrator for an account</button></div>') + '</div>';
+    var b = document.getElementById('croAsk');
+    if (b) b.onclick = function () {
+      b.disabled = true;
+      cro('access_request', { note: document.getElementById('croNote').value.trim() }).then(function (r) { a.pendingRequest = r.requested || new Date().toISOString(); toast('Request sent' + (r.adminsEmailed ? ' and the administrators emailed.' : '.')); renderGate(a); })
+        .catch(function (e) { b.disabled = false; toast(e.message, true); });
+    };
+  };
+  var ACCESS_KEY = 'croAccessOk';
+  var gate = (function () { try { var c = JSON.parse(sessionStorage.getItem(ACCESS_KEY) || 'null'); if (c && Date.now() - c.t < 600000) return Promise.resolve(c.a); } catch (e) { } return cro('access_check', {}); })();
+  gate.then(function (a) {
+    if (!a.allowed) return renderGate(a);
+    try { sessionStorage.setItem(ACCESS_KEY, JSON.stringify({ t: Date.now(), a: a })); } catch (e) { }
+    if (a.autoCreated) toast('A Circularo account was created for you: check your email to set your password.');
+    else if (a.status === 'invited' && page === 'send') toast('Your Circularo invitation is still open: accept it from the Circularo email to sign.');
+    if (a.status === 'none' && a.admin) toast('You have no Circularo account (allowed because you are a CRO administrator).');
+    go();
+  }).catch(function (e) { if (/Unknown operation/i.test(e.message)) go(); else fail(e); });
+  var go = function () { ({
     dashboard: renderDashboard,
     send: renderSend,
     requests: renderRequests,
     request: renderRequest,
     users: renderUsers
-  }[page] || renderDashboard)();
+  }[page] || renderDashboard)(); };
 })();

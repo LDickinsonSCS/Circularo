@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "note": "CRO configuration. Read-only at runtime. No secrets here: the Circularo API key is the secure server variable CRO_API_KEY.",
   "circularo": {
     "apiBase": "https://sudocode.sandbox.circularo.com/api/v1",
@@ -776,9 +776,29 @@
     "firstAfterHours": 48,
     "everyHours": 48,
     "max": 5,
-    "from": "",
     "subject": "",
     "body": "",
     "note": "by = tta: CRO Sync emails waiting recipients through TotalAgility with the link to their Circularo signing page; empty subject/body = built-in text; placeholders {name} {title} {url} {sender} {deadline} {action} {howto}. by = circularo: Circularo's own reminders (set defaults.reminders.intervalDays)."
+  },
+  "mail": {
+    "provider": "tta",
+    "from": "",
+    "graph": {
+      "tenantId": "",
+      "clientId": "",
+      "sender": "",
+      "saveToSentItems": false
+    },
+    "note": "provider graph = Microsoft Graph sendMail (app with Mail.Send; client secret entered in secure variable CRO_GRAPH_SECRET, then key_migrate {name:'graph'}); provider tta = TotalAgility mail settings with 'from'."
+  },
+  "access": {
+    "requireCircularoAccount": true,
+    "autoCreate": {
+      "enabled": false,
+      "domains": [],
+      "role": "sign"
+    },
+    "adminEmails": [],
+    "note": "CRO pages need a Circularo account matched by the TotalAgility user's email (admins exempt). autoCreate: invite automatically when the email domain is listed. adminEmails receive access requests."
   }
 }
