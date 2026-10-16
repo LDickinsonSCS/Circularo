@@ -20,7 +20,7 @@ namespace Cro
         {
         }
 
-        private const string VERSION = "cro-api 0.16.0";
+        private const string VERSION = "cro-api 0.16.1";
         private const string SYSTEM_RESOURCE = "7DF43CCDF24611D2804B00104B71BD10";
         private const string DEFAULT_DB = @"Server=.\SQLEXPRESS;Database=Circularo;Integrated Security=true;TrustServerCertificate=true;Connect Timeout=15";
 
@@ -659,7 +659,7 @@ namespace Cro
                     var df = new Dictionary<string, object>();
                     df["user"] = new List<object> { shareTo[rid] }; df["type"] = "annotation"; df["subtype"] = "annotation_date_current";
                     df["pages"] = new List<object> { (double)pages }; df["position"] = Pos(x, y + h + 0.004, Math.Min(w, 0.16), 0.022);
-                    df["required"] = false; df["readOnly"] = true;
+                    df["required"] = false;
                     sigFields.Add(df);
                 }
                 idx++;
